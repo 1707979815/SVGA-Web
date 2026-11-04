@@ -1,0 +1,30 @@
+name: Feature request / 需求建议
+description: 新能力、API 改进或迁移适配建议
+labels: [enhancement]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 描述业务场景与当前受阻的原因，比"希望支持 X"更容易被采纳
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的 API 或行为
+      description: 若有参考实现（其他播放器 / 其他库）请附链接
+    validations:
+      required: false
+
+  - type: dropdown
+    id: breaking
+    attributes:
+      label: 是否需要破坏性变更
+      options:
+        - 不需要（新增能力）
+        - 需要（可能影响现有 API）
+        - 不确定
+    validations:
+      required: false

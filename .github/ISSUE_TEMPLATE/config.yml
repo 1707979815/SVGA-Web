@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 在线演示 / Live demo
+    url: https://1707979815.github.io/custom-svga/
+    about: 先在这里确认是否为用法问题（展示页、单实例回归、多实例压力）
+  - name: npm 包页
+    url: https://www.npmjs.com/package/custom-svga
+    about: API 文档、版本历史与体积信息

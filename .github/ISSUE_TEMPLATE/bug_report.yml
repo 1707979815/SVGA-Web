@@ -1,0 +1,64 @@
+name: Bug report / 问题反馈
+description: 播放异常、解析失败、性能或类型问题
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。缺少版本与复现步骤的问题通常无法定位，请尽量补齐。
+
+  - type: input
+    id: version
+    attributes:
+      label: custom-svga 版本
+      placeholder: 2.4.0
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: 运行环境
+      description: 浏览器 / 设备 / 是否真机
+      placeholder: Chrome 130 桌面 / iOS 17 Safari / Android 13 微信内置浏览器
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: 解析模式
+      options:
+        - 默认（useWorker 未指定）
+        - useWorker: true（真实 Worker）
+        - useWorker: false（主线程 MockWorker）
+    validations:
+      required: false
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 最小可复现片段或在线链接（StackBlitz / CodeSandbox 最佳）
+      placeholder: |
+        1. new Player(canvas, { ... })
+        2. await Parser.loadUrl(url)
+        3. 期望 X，实际 Y
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 期望行为 / 实际行为
+      description: 有控制台报错或录屏请一并贴出
+    validations:
+      required: true
+
+  - type: input
+    id: asset
+    attributes:
+      label: 素材信息（可选）
+      description: 若与特定 svga 文件相关，请说明 SVGA 版本、帧数、是否含 shape / mateKey；可提供脱敏文件
+    validations:
+      required: false

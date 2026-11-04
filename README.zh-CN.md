@@ -2,26 +2,47 @@
 
 # custom-svga
 
-轻量、可摇树的 SVGA 动画播放器，面向 Vue3、现代浏览器与移动端。
+面向 Vue 3 与现代浏览器的 SVGA 动画播放器 —— **gzip 13.3KB，零运行时依赖**。
 
 [English](./README.md) | **简体中文**
 
-**⭐ 如果这个项目对你有帮助，欢迎在 GitHub 上点亮 Star 支持！**
-
+[![npm version](https://img.shields.io/npm/v/custom-svga)](https://www.npmjs.com/package/custom-svga)
+[![npm downloads](https://img.shields.io/npm/dm/custom-svga)](https://www.npmjs.com/package/custom-svga)
+[![minzipped size](https://img.shields.io/bundlephobia/minzip/custom-svga)](https://bundlephobia.com/package/custom-svga)
+[![license](https://img.shields.io/npm/l/custom-svga)](https://www.npmjs.com/package/custom-svga)
 [![GitHub stars](https://img.shields.io/github/stars/1707979815/custom-svga?style=social&label=Star)](https://github.com/1707979815/custom-svga)
 
 ```
-极致轻量 · 移动端更高效 · 同构内联 Worker 解析 · 动态精灵/文本替换 · 零 UI 框架依赖
+同构内联 Worker · 动态精灵/文本替换 · 抽帧渲染 · DPR 上限 · 可摇树
 ```
 
 </div>
 
-**[在线 Demo](https://1707979815.github.io/custom-svga/)**（单实例回归 / 多实例压力测试）
+<!-- TODO: 录屏后替换为真实 GIF：![preview](./docs/preview.gif) -->
+**[在线演示](https://1707979815.github.io/custom-svga/)** —— 展示页、单实例回归页与多实例压力页。
 
 - **同构内联 Worker 解析**：真实 Web Worker 可用时自动在 Worker 内解析；不支持/受限时主线程 `MockWorker`（沙箱 `new Function`）复用同一份代码降级，零配置。
-- **构建期内联**：解析代码在打包时编译为字符串内联进主包，单入口、无独立 worker 产物。
+- **构建期内联**：解析代码在打包时编译为字符串内联进主包，单入口、无独立 worker 产物、无需额外部署 worker 文件。
 - **动态精灵/文本替换**、海报、正/逆序、缩放适配、帧区间/播放至指定帧、循环与结束行为。
-- 零 UI 框架依赖，仅构建期依赖 `fflate`；**esm ~40KB / gzip ~13KB**（小于官方 svga.lite）。
+- **为移动端调优**：抽帧渲染、Path2D 预缓存、帧位图缓存、DPR 上限、视口外自动暂停。
+
+## 为什么选 custom-svga
+
+包体积（gzip，整包，无代码分割）：
+
+| 包 | 版本 | gzip |
+|---|---|---|
+| **custom-svga** | 2.4.0 | **13.3 KB** |
+| `svga.lite` | 1.6.x | ~27 KB（其 README 自述） |
+| `svgaplayerweb` | 2.3.x | ~34 KB（Bundlephobia） |
+
+除了基本播放，还额外提供：
+
+- **无需部署 worker 文件** —— 解析器随主包一起走，省掉 `public/svga.worker.js` 的缓存与版本同步问题。
+- **不会因 Worker 不可用而卡死** —— 任何环境都会降级到主线程跑同一份代码。
+- **完整的 TypeScript 类型** —— `MovieData`、`PlayConfig`、`DynamicText` 等均带类型，无需 `any` 断言。
+- **弱机可调的三档开关** —— `frameThrottling`（时间维度）、`maxDpr`（像素维度）、`cacheFrames`（重复计算维度）。
+- **可预测的生命周期** —— `onReady` / `onLoopEnd` / `onEnd` / `onError`，停止行为由 `fillMode` 统一约束。
 
 ## 极致轻量 · 为移动端而生
 
@@ -62,6 +83,35 @@ onBeforeUnmount(() => player?.destroy())
 
 <template><canvas ref="canvas"></canvas></template>
 ```
+
+## 从 svgaplayerweb / svga.lite 迁移
+
+API 有意保持接近，多数项目只需要改「加载入口」和「播放入口」两处：
+
+| `svgaplayerweb` | `custom-svga` | 说明 |
+|---|---|---|
+| `new SVGA.Player(canvas)` | `new Player(canvas \| div, config?)` | 传容器 `div` 时 canvas 由库自动创建与管理 |
+| `new SVGA.Parser()` + `parser.load(url, cb)` | `await Parser.loadUrl(url)` | Promise 化，共用 Worker，内置 LRU 缓存 |
+| `player.setVideoItem(item)` | 同名 | 也可直接传 `{ url, ...解析选项 }` |
+| `player.startAnimation()` | `player.play(config?)` | 配置通过参数传入，而非实例属性 |
+| `player.pauseAnimation()` | `player.pause()` | |
+| `player.stopAnimation()` | `player.stop()` | 按 `fillMode` 决定停在末帧/首帧/清空 |
+| `player.stepToFrame(n, play)` | `player.stepToFrame(n, andPlay?)` | |
+| `player.stepToPercentage(p)` | 同名 | |
+| `player.setImage(url, key)` | 同名 | |
+| `player.setText(dynamicText, key)` | 同名 | `{ text, size, color, family }` |
+| `player.clearDynamicObjects()` | `player.clearDynamic(key?)` | 省略 `key` 时清空全部 |
+| `player.loops = n` | `play({ loop: n })` | `0` 为无限循环 |
+| `player.clearsAfterStop = true/false` | `fillMode: 'clear' \| 'forwards' \| 'backwards'` | |
+| `player.onFrame(cb)` | `player.onProcess(cb)` | 回调参数为当前帧号 |
+| `player.onFinished(cb)` | `player.onEnd(cb)` / `player.onLoopEnd(cb)` | `onEnd` 仅在有限 `loop` 结束时触发 |
+
+切换前需要知道的两点差异：
+
+- **解析是 Promise 而非回调**，缓存与并发去重已内置（`Parser.clear()` / `Parser.delete(key)`）。
+- **Worker 随包内联**，不需要再往 `public/` 拷 `svga.worker.js`，也不存在解析器与播放器版本不一致的问题。
+
+如果你在迁移中遇到映射不上的写法，欢迎带代码片段提 issue —— 迁移断层会当作 bug 处理。
 
 ## Player
 
@@ -201,6 +251,13 @@ player.clearDynamic()                                                    // 清�
 ## 变更记录
 
 见 [CHANGELOG.md](./CHANGELOG.md)。
+
+## 相关链接
+
+- npm：<https://www.npmjs.com/package/custom-svga>
+- 在线演示：<https://1707979815.github.io/custom-svga/>
+- 问题反馈与需求：<https://github.com/1707979815/custom-svga/issues>
+- 源码：未公开，本项目以 npm 包与在线演示的形式发布
 
 ## License
 

@@ -2,7 +2,7 @@
 
 # custom-svga
 
-A lightweight, tree-shakable SVGA animation player for Vue 3 & modern web.
+An SVGA animation player for Vue 3 & modern web — **13.3KB gzip, zero runtime dependencies**.
 
 **English** | [简体中文](./README.zh-CN.md)
 
@@ -13,18 +13,36 @@ A lightweight, tree-shakable SVGA animation player for Vue 3 & modern web.
 [![GitHub stars](https://img.shields.io/github/stars/1707979815/custom-svga?style=social&label=Star)](https://github.com/1707979815/custom-svga)
 
 ```
-Ultra-light · Mobile-first · Isomorphic inline worker parsing · Dynamic sprite/text replacement · Zero runtime deps
+Isomorphic inline worker · Dynamic sprite/text replacement · Frame throttling · DPR cap · Tree-shakable
 ```
 
 </div>
 
-<!-- TODO: add a GIF preview of the player here, e.g. ![preview](./docs/preview.gif) -->
-**[Online Demo](https://1707979815.github.io/custom-svga/)** (single-instance regression & multi-instance stress playground)
+<!-- TODO: 录屏后替换为真实 GIF：![preview](./docs/preview.gif) -->
+**[Live Demo](https://1707979815.github.io/custom-svga/)** — showcase, single-instance regression and multi-instance stress playground.
 
 - **Isomorphic inline worker parsing**: parses in a real Web Worker when available; otherwise falls back to a main-thread `MockWorker` (sandboxed `new Function`) running the exact same code — zero configuration.
 - **Build-time inlining**: the worker is compiled into a string at build time and inlined into the bundle. Single entry, no separate worker files, no runtime dependencies (`fflate` is inlined too).
 - **Dynamic sprite/text replacement**, poster image, forward/backward playback, scale modes, frame range, seek-to-frame, loop & end behaviors.
-- **~40KB ESM / ~13KB gzip** — smaller than the official svga.lite, with zero UI framework dependencies.
+- **Tuned for mobile**: frame throttling, Path2D pre-caching, frame bitmap cache, DPR cap, automatic pause when off-screen.
+
+## Why custom-svga
+
+Bundle size, gzipped (whole package, no code splitting):
+
+| Package | Version | gzip |
+|---|---|---|
+| **custom-svga** | 2.4.0 | **13.3 KB** |
+| `svga.lite` | 1.6.x | ~27 KB (per its README) |
+| `svgaplayerweb` | 2.3.x | ~34 KB (Bundlephobia) |
+
+Beyond a basic player, this package gives you:
+
+- **No worker file to host or cache-bust** — the parser ships inside the main bundle.
+- **Never blocks on a missing Worker** — every environment falls back to the same code on the main thread.
+- **Full TypeScript surface** — `MovieData`, `PlayConfig`, `DynamicText` and friends are typed, no `any` casts.
+- **Playback knobs for weak devices** — `frameThrottling` (time dimension), `maxDpr` (pixel dimension), `cacheFrames` (computation dimension).
+- **Predictable lifecycle** — `onReady` / `onLoopEnd` / `onEnd` / `onError`, plus `fillMode` for stop behavior.
 
 ## Ultra-light, built for mobile
 
@@ -65,6 +83,35 @@ onBeforeUnmount(() => player?.destroy())
 
 <template><canvas ref="canvas"></canvas></template>
 ```
+
+## Migrating from `svgaplayerweb` / `svga.lite`
+
+The API is intentionally close, so most apps only change the loader and the playback entry point:
+
+| `svgaplayerweb` | `custom-svga` | Note |
+|---|---|---|
+| `new SVGA.Player(canvas)` | `new Player(canvas \| div, config?)` | pass a container `div` and the canvas is created for you |
+| `new SVGA.Parser()` + `parser.load(url, cb)` | `await Parser.loadUrl(url)` | promise-based, shared worker, LRU cache built in |
+| `player.setVideoItem(item)` | same | also accepts `{ url, ...parseOptions }` directly |
+| `player.startAnimation()` | `player.play(config?)` | config is passed as an argument, not as properties |
+| `player.pauseAnimation()` | `player.pause()` | |
+| `player.stopAnimation()` | `player.stop()` | applies `fillMode` |
+| `player.stepToFrame(n, play)` | `player.stepToFrame(n, andPlay?)` | |
+| `player.stepToPercentage(p)` | same | |
+| `player.setImage(url, key)` | same | |
+| `player.setText(dynamicText, key)` | same | `{ text, size, color, family }` |
+| `player.clearDynamicObjects()` | `player.clearDynamic(key?)` | clears all when `key` is omitted |
+| `player.loops = n` | `play({ loop: n })` | `0` = infinite |
+| `player.clearsAfterStop = true/false` | `fillMode: 'clear' \| 'forwards' \| 'backwards'` | |
+| `player.onFrame(cb)` | `player.onProcess(cb)` | payload is the frame index |
+| `player.onFinished(cb)` | `player.onEnd(cb)` / `player.onLoopEnd(cb)` | `onEnd` fires only for a finite `loop` |
+
+Two differences worth knowing before you swap:
+
+- **The parser is promise-based** instead of callback-based, with cache and in-flight de-duplication built in (`Parser.clear()` / `Parser.delete(key)`).
+- **The worker ships inside the bundle**, so there is no `svga.worker.js` to copy into `public/`, and no parser/player version mismatch to keep in sync.
+
+If something in your app does not map cleanly, open an issue with the snippet — migration gaps are treated as bugs.
 
 ## Player
 
@@ -204,6 +251,13 @@ player.clearDynamic()                                                    // clea
 ## Changelog
 
 See [CHANGELOG.md](./CHANGELOG.md).
+
+## Links
+
+- npm: <https://www.npmjs.com/package/custom-svga>
+- Live demo: <https://1707979815.github.io/custom-svga/>
+- Issues & feature requests: <https://github.com/1707979815/custom-svga/issues>
+- Source: not published — the library ships as an npm package, with the live demo as the reference implementation
 
 ## License
 
