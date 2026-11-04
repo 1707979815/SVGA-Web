@@ -1,25 +1,45 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import ShowcaseView from './ShowcaseView.vue'
+import BenchView from './BenchView.vue'
+import CompareView from './CompareView.vue'
 import SingleView from './SingleView.vue'
 import MultiView from './MultiView.vue'
 
 /**
- * demo 外壳：三个入口共用同一产物。
+ * demo 外壳：五个入口共用同一产物。
  * - 在线演示（Showcase）：面向首次访问者的产品化首屏，默认打开；
- * - 单实例回归 / 多实例播放：作者自用的全量参数面板，保留用于回归验证。
+ * - 基准测试（Bench）：页面内跑量化指标，输出首帧/掉帧/长任务/堆增量；
+ * - 官方对比（Compare）：与 svgaplayerweb 并排播放，验证循环末帧是否完整；
+ * - 单实例回归 / 多实例播放：作者自用的全量参数面板。
  */
 
-const active = ref<'showcase' | 'single' | 'multi'>('showcase')
+type TabKey = 'showcase' | 'bench' | 'compare' | 'single' | 'multi'
+
+/** tab 定义（key 与组件一一对应） */
+const TABS: Array<{ key: TabKey; label: string }> = [
+  { key: 'showcase', label: '在线演示' },
+  { key: 'bench', label: '基准测试' },
+  { key: 'compare', label: '官方对比' },
+  { key: 'single', label: '单实例回归' },
+  { key: 'multi', label: '多实例播放' },
+]
+
+const active = ref<TabKey>('showcase')
 </script>
 
 <template>
   <div class="shell">
     <nav class="tabs">
       <div class="group">
-        <button :class="{ active: active === 'showcase' }" @click="active = 'showcase'">在线演示</button>
-        <button :class="{ active: active === 'single' }" @click="active = 'single'">单实例回归</button>
-        <button :class="{ active: active === 'multi' }" @click="active = 'multi'">多实例播放</button>
+        <button
+          v-for="tab in TABS"
+          :key="tab.key"
+          :class="{ active: active === tab.key }"
+          @click="active = tab.key"
+        >
+          {{ tab.label }}
+        </button>
       </div>
       <div class="links">
         <a href="https://www.npmjs.com/package/custom-svga" target="_blank" rel="noreferrer">npm</a>
@@ -27,6 +47,8 @@ const active = ref<'showcase' | 'single' | 'multi'>('showcase')
       </div>
     </nav>
     <ShowcaseView v-if="active === 'showcase'" />
+    <BenchView v-else-if="active === 'bench'" />
+    <CompareView v-else-if="active === 'compare'" />
     <SingleView v-else-if="active === 'single'" />
     <MultiView v-else />
   </div>
@@ -52,6 +74,7 @@ const active = ref<'showcase' | 'single' | 'multi'>('showcase')
 
   .group {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
   }
 
@@ -76,7 +99,7 @@ const active = ref<'showcase' | 'single' | 'multi'>('showcase')
     border: 1px solid #242b3d;
     color: var(--muted);
     border-radius: 8px 8px 0 0;
-    padding: 9px 22px;
+    padding: 9px 18px;
     font-size: 14px;
     cursor: pointer;
     border-bottom: none;
@@ -88,9 +111,18 @@ const active = ref<'showcase' | 'single' | 'multi'>('showcase')
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 720px) {
   .tabs {
     flex-wrap: wrap;
+
+    .group {
+      gap: 6px;
+    }
+
+    button {
+      padding: 7px 12px;
+      font-size: 13px;
+    }
 
     .links {
       padding-bottom: 8px;
