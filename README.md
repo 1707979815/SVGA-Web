@@ -28,21 +28,32 @@ Isomorphic inline worker · Dynamic sprite/text replacement · Frame throttling 
 
 ## Why custom-svga
 
-Bundle size, gzipped (whole package, no code splitting):
+**Smallest in its class, with more controls than the official players.** Roughly a half to a third of the gzipped size, plus a set of playback knobs designed for real product pages.
 
-| Package | Version | gzip |
-|---|---|---|
-| **custom-svga** | 2.4.0 | **13.3 KB** |
-| `svga.lite` | 1.6.x | ~27 KB (per its README) |
-| `svgaplayerweb` | 2.3.x | ~34 KB (Bundlephobia) |
+Size, gzipped (whole package, no code splitting):
 
-Beyond a basic player, this package gives you:
+| Package | Version | gzip | vs. custom-svga |
+|---|---|---|---|
+| **custom-svga** | 2.4.0 | **13.3 KB** | — |
+| `svga.lite` | 1.6.x | ~27 KB (per its README) | ~2× larger |
+| `svgaplayerweb` | 2.3.x | ~34 KB (Bundlephobia) | ~2.6× larger |
 
-- **No worker file to host or cache-bust** — the parser ships inside the main bundle.
-- **Never blocks on a missing Worker** — every environment falls back to the same code on the main thread.
-- **Full TypeScript surface** — `MovieData`, `PlayConfig`, `DynamicText` and friends are typed, no `any` casts.
-- **Playback knobs for weak devices** — `frameThrottling` (time dimension), `maxDpr` (pixel dimension), `cacheFrames` (computation dimension).
-- **Predictable lifecycle** — `onReady` / `onLoopEnd` / `onEnd` / `onError`, plus `fillMode` for stop behavior.
+What you get beyond a plain player:
+
+| Capability | What it does |
+|---|---|
+| **Inline worker** | The parser ships inside the main bundle — nothing to deploy to `public/`, nothing to cache-bust. |
+| **Isomorphic fallback** | If a real Worker is unavailable (CSP, old webview), the exact same code runs on the main thread. No blank animation. |
+| **`frameThrottling`** | Caps the paint rate (e.g. 15fps) on complex animations; timeline, duration and events are untouched. |
+| **`maxDpr`** | Caps `devicePixelRatio` per canvas: fewer rasterized pixels, less memory, big win on low-end Android. |
+| **`cacheFrames`** | Caches rendered frames as bitmaps when the loop range fits in `maxCacheFrames`; replays become pure `drawImage`. |
+| **`defaultPoster`** | A static image shown before playback, on load failure, and after `fillMode: 'clear'` — no white flash. |
+| **`onPoster` event** | Tells you *why* the poster appeared (`defaultPoster` / `external` / `clear`) so you can track failures. |
+| **`invisibleBehavior`** | `pause` (stop the timeline) or `skip` (keep the timeline, skip painting) when scrolled out of view. |
+| **`skipRender()`** | Keep the timeline running while painting is suspended — useful for tab switches and modals. |
+| **Full TypeScript** | Every config field, event payload and data structure is typed; no `any` casts in your app. |
+
+There is also one behavioral difference that people notice right after migrating: **the last frame of every loop is always drawn** — see [Loop playback](#loop-playback-the-last-frame-is-always-drawn).
 
 ## Ultra-light, built for mobile
 
@@ -106,10 +117,11 @@ The API is intentionally close, so most apps only change the loader and the play
 | `player.onFrame(cb)` | `player.onProcess(cb)` | payload is the frame index |
 | `player.onFinished(cb)` | `player.onEnd(cb)` / `player.onLoopEnd(cb)` | `onEnd` fires only for a finite `loop` |
 
-Two differences worth knowing before you swap:
+Three differences worth knowing before you swap:
 
 - **The parser is promise-based** instead of callback-based, with cache and in-flight de-duplication built in (`Parser.clear()` / `Parser.delete(key)`).
 - **The worker ships inside the bundle**, so there is no `svga.worker.js` to copy into `public/`, and no parser/player version mismatch to keep in sync.
+- **Loop boundaries are exact**: the last frame of every loop is painted before the wrap, so slow gift animations no longer look like they "skip the end". See [Loop playback](#loop-playback-the-last-frame-is-always-drawn).
 
 If something in your app does not map cleanly, open an issue with the snippet — migration gaps are treated as bugs.
 
@@ -124,24 +136,46 @@ new Player(element, config?)
 
 ### Methods
 
-| Method | Description |
-|---|---|
-| `setVideoItem(MovieData \| VideoUrlSource)` | Load animation data (a `Parser` result, or `{ url, ...parseOptions }` — calls `Parser.loadUrl` internally; parse options `useWorker` / `cache` / `useImageBitmap` are flattened at the top level) |
-| `play(config?)` | Start / resume playback; the passed config is persisted into the instance |
-| `setConfig(config?)` | Update playback config only (does not start playback); takes effect immediately even while playing |
-| `playRange(start, end, config?)` | Play a specific frame range |
-| `pause()` | Pause, keeping the current frame |
-| `stop()` | Stop and apply the configured end behavior (`fillMode`: last frame / first frame / clear) |
-| `skipRender(skip?)` | Toggle / set render skipping (the timeline still advances); toggles when called without arguments |
-| `stepToFrame(frame, andPlay?)` | Seek to a specific frame |
-| `stepToPercentage(p, andPlay?)` | Seek to a progress position (0~1) |
-| `setImage(img \| url, key)` | Dynamically replace a sprite image |
-| `setText(text \| DynamicText, key)` | Dynamically replace a sprite with text |
-| `clearDynamic(key?)` | Clear dynamic replacements; clears all when `key` is omitted |
-| `renderPoster(url)` | Render an external image onto the canvas as a static poster |
-| `resize()` | Recalibrate canvas size against the DOM container and DPR |
-| `clear()` | Clear current movie data and canvas (instance survives; `setVideoItem` can be called again) |
-| `destroy()` | Fully destroy the instance (canvas / listeners / memory); a new `Player` is required afterwards |
+| Method | Returns | Description |
+|---|---|---|
+| `setVideoItem(MovieData \| VideoUrlSource)` | `Promise<void>` | Load animation data. Pass a `MovieData` from `Parser`, or `{ url, ...parseOptions }` to load inside the player (`useWorker` / `cache` / `useImageBitmap` are flattened at the top level). Failures trigger `onError` and fall back to `defaultPoster`. |
+| `play(config?)` | `void` | Start / resume playback. The config is **persisted** into the instance. If the previous run ended naturally, playback restarts from the range entry frame. |
+| `setConfig(config?)` | `void` | Update config only, never starts playback. Takes effect immediately even while playing (except `frameThrottling`, which applies on the next frame). |
+| `playRange(startFrame, endFrame, config?)` | `void` | Play a specific frame range — shorthand for `setConfig({ startFrame, endFrame })` + `play()`. |
+| `pause()` | `void` | Pause at the current frame; the timeline stops and the last painted frame stays visible. |
+| `stop()` | `void` | End playback and apply `fillMode` (`forwards` = last frame, `backwards` = first frame, `clear` = clear canvas + poster). |
+| `skipRender(skip?)` | `boolean` | Suspend / resume painting while the timeline keeps advancing. Called with no argument it toggles; returns the new state. |
+| `stepToFrame(frame, andPlay?)` | `void` | Seek to an absolute frame. Out-of-range values are ignored. `andPlay` defaults to `false` (pauses). |
+| `stepToPercentage(p, andPlay?)` | `void` | Seek by progress, `p` clamped to `[0, 1]`. |
+| `setImage(img \| url, key)` | `Promise<void>` | Replace a sprite's image. Accepts `HTMLImageElement` / `ImageBitmap` / `HTMLCanvasElement` / a URL string. `key` must be an `imageKey` present in the movie. |
+| `setText(text \| DynamicText, key)` | `void` | Replace a sprite with text (see `DynamicText` below). |
+| `clearDynamic(key?)` | `void` | Remove one dynamic replacement, or all of them when `key` is omitted. |
+| `renderPoster(url)` | `Promise<void>` | Draw an external image onto the canvas right now (one-shot, unlike `defaultPoster`). |
+| `resize()` | `void` | Re-measure the container and DPR, resize the backing store accordingly. Called automatically on container resize. |
+| `clear()` | `void` | Drop the current movie and clear the canvas. The instance survives — call `setVideoItem` again to reuse it. |
+| `destroy()` | `void` | Fully destroy the instance: canvas (if created internally), observers, RAF, cached bitmaps and poster. A new `Player` is required afterwards. |
+
+### DynamicText
+
+`setText` accepts a plain string or a config object:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `text` | `string` | — | Text content (required) |
+| `size` | `string \| number` | `'14px'` | Font size, e.g. `'18px'` or `18` |
+| `family` | `string` | `'Arial'` | Font family |
+| `color` | `string` | `'#000000'` | Fill color, any CSS color |
+| `offset` | `{ x: number; y: number }` | `{ x: 0, y: 0 }` | Offset relative to the sprite's own center |
+
+Text is centered on the replaced sprite's layout box; use `offset` for fine positioning (e.g. baseline alignment).
+
+### SCALE_MODE
+
+| Value | Enum | Behaviour |
+|---|---|---|
+| `Fill` | `SCALE_MODE.FILL` | Stretch to fill, aspect ratio ignored |
+| `AspectFill` | `SCALE_MODE.ASPECT_FILL` | Cover: keep ratio, crop overflow |
+| `AspectFit` | `SCALE_MODE.ASPECT_FIT` | Contain: keep ratio, letterbox (default) |
 
 ### Updating config at runtime
 
@@ -205,7 +239,26 @@ import { queryMemoryInfo } from 'custom-svga'
 await queryMemoryInfo(url, true)       // log=true prints a table
 ```
 
-**options / ParserConfig**: `useWorker` (default `true`; `false` forces main-thread MockWorker parsing), `useImageBitmap` (default `false`; decode into `ImageBitmap`), `cache` (default `true`; 20-entry LRU). Buffer-based parsing (`loadFile` / `parseBuffer`) only writes to the cache when an explicit `movieDataId` is provided (anonymous buffers have no stable key, so they are not cached to avoid polluting the LRU); with the instance form, `movieDataId` also serves as the instance-level cache key. Instances additionally support **`autoClose`** (default `false`): when `true`, the Worker is released after each successful parse — ideal for low-frequency / one-shot parsing.
+### ParserOptions
+
+| Option | Default | Description |
+|---|---|---|
+| `useWorker` | `true` | `false` forces main-thread parsing through the isomorphic `MockWorker` (same code, no thread) |
+| `cache` | `true` | Write results into the shared 20-entry LRU |
+| `useImageBitmap` | `false` | Decode images into `ImageBitmap` instead of `HTMLImageElement` (faster draw, needs explicit `close()` on eviction) |
+| `movieDataId` | - | Explicit cache key. Also enables caching for buffer-based parsing, which is otherwise anonymous and skipped |
+| `autoClose` | `false` | Instance only: release the Worker after each successful parse — ideal for rare, one-shot parses |
+
+Buffer-based parsing (`loadFile` / `parseBuffer`) only writes to the cache when an explicit `movieDataId` is provided: anonymous buffers have no stable key, so they are not cached (this keeps the LRU clean).
+
+### queryMemoryInfo
+
+```ts
+const info = await queryMemoryInfo(url, true) // log = false silences console.table
+// { fileSize, imageMemory, dictionaryMemory, version, fps, frames, width, height, desc }
+```
+
+`fileSize` is the raw SVGA size; `imageMemory` estimates decoded bitmap memory (`width × height × 4` per image); `dictionaryMemory` is the JSON size of params + sprites. Useful when triaging "the animation is heavy" reports.
 
 ## PlayConfig
 
@@ -222,8 +275,84 @@ await queryMemoryInfo(url, true)       // log=true prints a table
 | `invisibleBehavior` | `pause` | When invisible: `pause` (timeline stops) or `skip` (skip painting only, timeline keeps advancing) |
 | `frameThrottling` | `0` | Frame-throttled rendering (for complex animations): target paint-rate cap in fps; the timeline and duration are unaffected |
 | `cacheFrames` / `maxCacheFrames` | `false` / `100` | Frame cache (bitmap). Enabled only when the loop range length ≤ `maxCacheFrames`; otherwise disabled entirely with a one-time hint. Prefer `frameThrottling` for large canvases |
-| `defaultPoster` | - | Default static poster (shown when not playing / on error / after clear) |
+| `defaultPoster` | - | Static cover image shown before playback, on load failure, and after `fillMode: 'clear'`. See [Default poster](#default-poster-static-cover) |
 | `autoPlay` | `false` | Whether to play immediately after `setVideoItem` finishes loading |
+
+## Default poster (static cover)
+
+`defaultPoster` is a **remote image URL** used to cover the periods when there is no animation to draw. It is not a separate layer — it is painted onto the same canvas as a fallback frame.
+
+### When it appears
+
+| Moment | Why |
+|---|---|
+| Right after construction, before `setVideoItem` | Container shows the cover instead of an empty box while the file loads |
+| `setVideoItem` fails to download / parse | Weak network, 404, CORS — `onError` fires at the same time |
+| `stop()` with `fillMode: 'clear'` | Canvas is cleared, poster refills it |
+| After `clear()` | Movie data is gone but the instance lives on, poster takes over |
+| `setConfig({ defaultPoster })` while not playing | New image is drawn immediately |
+
+The poster hides automatically on `play()` and on `setVideoItem` (a new movie takes over the canvas).
+
+### Typical scenarios
+
+- **Gift / feed animations**: cards render the cover first, then swap to the animation as soon as parsing finishes — no layout jump, no white flash.
+- **Weak network fallback**: SVGA files range from hundreds of KB to several MB; a static cover is far better than a blank block.
+- **Paused state**: with `fillMode: 'clear'`, stopping returns the card to its cover image.
+- **Consistent scaling**: the poster is scaled with the same `scaleMode` rules as the animation, so it lines up pixel-for-pixel.
+
+### Usage
+
+```ts
+const player = new Player(canvas, {
+  loop: 0,
+  fillMode: 'clear',
+  defaultPoster: 'https://example.com/anim-cover.png',
+})
+
+// Observable: `source` tells you why the poster showed up
+player.onPoster(({ state, source, url }) => {
+  if (state === 'show') console.log('poster shown', source, url)
+})
+
+// Swap the image on the fly (redrawn immediately when not playing)
+player.setConfig({ defaultPoster: 'https://example.com/cover-2.png' })
+```
+
+`onPoster` payload:
+
+| Field | Values | Meaning |
+|---|---|---|
+| `state` | `'show'` / `'hide'` | Poster became visible / was replaced by animation |
+| `source` | `'defaultPoster'` | The configured poster was drawn (idle / clear / resize) |
+| | `'external'` | `renderPoster()` was used, or the poster was drawn as load-failure fallback |
+| | `'play'` / `'setMovie'` | Hide events: playback started, or a new movie was loaded |
+| `url` | `string?` | Poster URL, only present on `show` |
+
+### `defaultPoster` vs. `renderPoster()`
+
+| | `defaultPoster` | `player.renderPoster(url)` |
+|---|---|---|
+| Nature | Config (passive fallback) | Method (draws once, on demand) |
+| Trigger | Automatic: idle / failure / cleared canvas | Only when you call it |
+| Lifetime | Lives with the instance, released on `destroy()` | Paints the current frame only; the next draw may overwrite it |
+
+> The poster is a remote image. Cross-origin images are loaded with `crossorigin="anonymous"`, so the host must send CORS headers — otherwise loading fails and the poster silently does not appear.
+
+## Loop playback: the last frame is always drawn
+
+If you migrate from another SVGA player you may have seen loops where the **last frame seems to be swallowed** — the picture jumps from the second-to-last frame straight back to the first. It is most obvious on slow animations (8–12fps gift effects) and on short loops.
+
+This library drives frames in a **draw-then-advance** order:
+
+1. Draw `currentFrame`;
+2. Emit `onProcess(currentFrame)`;
+3. `currentFrame++`;
+4. Only if it crosses `endFrame` does the loop wrap (`onLoopEnd` → `onEnd` → stop).
+
+So the frame where `currentFrame === endFrame` is always painted before the wrap happens. The same holds for a custom range (`startFrame` / `endFrame`) and for `direction: 'backward'`, where `startFrame` is the last frame you see.
+
+> With `frameThrottling` enabled, some *paints* are intentionally skipped to cap the refresh rate — but the timeline is still complete: `onProcess` and loop counting advance every frame, and the loop boundary is measured on frames, not on paints.
 
 ## Isomorphic Worker
 
@@ -246,6 +375,9 @@ player.clearDynamic()                                                    // clea
 
 - **Not returning to the first frame after stop?** `stop()` follows the configured `fillMode` (last frame / first frame / clear). Set `fillMode: 'backwards'` if you always want the first frame.
 - **Pause vs. stop?** `pause()` freezes at the current frame; `stop()` ends playback and applies `fillMode`.
+- **The last frame of a loop looks skipped?** It is not — see [Loop playback](#loop-playback-the-last-frame-is-always-drawn). Frames are drawn before advancing, so `endFrame` is always painted.
+- **`defaultPoster` does not appear?** Three usual causes: the image is cross-origin without CORS headers (it is loaded with `crossorigin="anonymous"`), the config is set after `play()` started (it only paints while not playing), or the URL 404s — check `onPoster` and the console warning.
+- **`setText` / `setImage` has no effect?** The `key` must be an `imageKey` that actually exists in the movie (`movie.sprites[i].imageKey`). Silent no-ops usually mean a typo or a layer the designer removed.
 - **Bundle size?** Single-file ESM/CJS/UMD builds; `fflate` is inlined into the worker string, so no extra runtime dependencies are needed.
 
 ## Changelog
