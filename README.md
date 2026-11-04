@@ -201,6 +201,10 @@ player.clearDynamic()                                                    // clea
 - **Pause vs. stop?** `pause()` freezes at the current frame; `stop()` ends playback and applies `fillMode`.
 - **Bundle size?** Single-file ESM/CJS/UMD builds; `fflate` is inlined into the worker string, so no extra runtime dependencies are needed.
 
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md).
+
 ## License
 
 MIT © [DreamLife(Zhou)](https://github.com/1707979815)

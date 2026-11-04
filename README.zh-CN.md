@@ -198,6 +198,10 @@ player.clearDynamic()                                                    // 清�
 - **暂停与停止区别**：`pause()` 停在当前帧；`stop()` 结束并应用 `fillMode`。
 - **体积**：esm/cjs/umd 单文件，fflate 已内联进 worker 字符串，运行时不需额外依赖。
 
+## 变更记录
+
+见 [CHANGELOG.md](./CHANGELOG.md)。
+
 ## License
 
 MIT © [DreamLife(Zhou)](https://github.com/1707979815)
