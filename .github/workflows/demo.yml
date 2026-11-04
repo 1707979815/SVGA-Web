@@ -3,6 +3,8 @@ name: Deploy demo to GitHub Pages
 # 本仓库（GitHub 公开仓库）只含 README 与 demo 源码，不含库 src。
 # demo 依赖 npm registry 上已发布的 custom-svga（见 demo/vite-rollup-esm/package.json）。
 # npm 发布新版本后，手动跑一次本 workflow（workflow_dispatch）即可让线上 demo 用上新版本。
+# 不提交 package-lock.json：Windows 生成的 lock 会缺 Linux 平台的 optionalDependencies
+# （npm/cli#4828，如 @rollup/rollup-linux-x64-gnu），CI 每次在 Linux 上全新解析依赖。
 
 on:
   push:
@@ -30,8 +32,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: demo/vite-rollup-esm/package-lock.json
 
       - name: Install demo dependencies
         working-directory: demo/vite-rollup-esm
