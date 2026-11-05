@@ -34,7 +34,7 @@
 
 | 包 | 版本 | gzip | 相对本包 |
 |---|---|---|---|
-| **custom-svga** | 2.4.0 | **13.3 KB** | — |
+| **custom-svga** | 2.4.1 | **13.3 KB** | — |
 | `svga.lite` | 1.6.x | ~27 KB（其 README 自述） | 约 2 倍 |
 | `svgaplayerweb` | 2.3.x | ~34 KB（Bundlephobia） | 约 2.6 倍 |
 

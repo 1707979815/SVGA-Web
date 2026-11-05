@@ -3,6 +3,12 @@
 记录 custom-svga 的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 日期以 npm 实际发布时间为准。1.x 为旧架构（离屏渲染），已归档 `versions/`，不再逐版本展开。
 
+## [2.4.1] - 2026-11-05
+
+### Fixed
+
+- 仓库改名为 `SVGA-Web` 后同步元数据：`repository` / `homepage` / `bugs` 与 README 链接全部指向新仓库 <https://github.com/1707979815/SVGA-Web>，在线演示改为 <https://1707979815.github.io/SVGA-Web/>（GitHub Pages 域名不随仓库改名重定向，旧地址会直接 404）。仅元数据与文档变更，构建产物与运行时行为与 2.4.0 完全一致。
+
 ## [2.4.0] - 2026-11-05
 
 ### Added

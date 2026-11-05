@@ -34,7 +34,7 @@ Size, gzipped (whole package, no code splitting):
 
 | Package | Version | gzip | vs. custom-svga |
 |---|---|---|---|
-| **custom-svga** | 2.4.0 | **13.3 KB** | — |
+| **custom-svga** | 2.4.1 | **13.3 KB** | — |
 | `svga.lite` | 1.6.x | ~27 KB (per its README) | ~2× larger |
 | `svgaplayerweb` | 2.3.x | ~34 KB (Bundlephobia) | ~2.6× larger |
 
