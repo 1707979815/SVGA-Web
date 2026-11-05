@@ -5,7 +5,7 @@ import BenchView from './BenchView.vue'
 import CompareView from './CompareView.vue'
 import SingleView from './SingleView.vue'
 import MultiView from './MultiView.vue'
-import { buildKind, type BuildKind } from './svga'
+import * as svgaBackend from './svga'
 
 /**
  * demo 外壳：五个入口共用同一产物。
@@ -47,6 +47,16 @@ function selectTab(key: TabKey) {
   url.searchParams.set('tab', key)
   history.replaceState(null, '', url)
 }
+
+/** 构建产物标识（主包 demo 的 src/svga.ts 提供，展示仓演示不提供） */
+type BuildKind = 'rollup' | 'tsup'
+
+/**
+ * 当前构建产物：由 src/svga.ts 暴露。
+ * 主包 demo 内置 rollup / tsup 两份 vendor 产物，故能切换；GitHub 展示仓直接依赖 npm 包，
+ * 其 svga.ts 不导出该字段 —— 此时顶栏隐藏「产物」切换器，保持同一份 App.vue 两仓通用。
+ */
+const buildKind = (svgaBackend as { buildKind?: BuildKind }).buildKind
 
 /** 可切换的构建产物（默认 rollup，与 src/svga.ts 的回落规则一致） */
 const BUILDS: Array<{ key: BuildKind; label: string; title: string }> = [
@@ -96,22 +106,24 @@ function switchBuild(kind: BuildKind) {
       </nav>
 
       <div class="tools">
-        <div class="seg" role="group" aria-label="切换构建产物">
-          <span class="seg-label">产物</span>
-          <button
-            v-for="item in BUILDS"
-            :key="item.key"
-            type="button"
-            :class="{ active: buildKind === item.key }"
-            :aria-pressed="buildKind === item.key"
-            :title="item.title"
-            @click="switchBuild(item.key)"
-          >
-            {{ item.label }}
-          </button>
-        </div>
+        <template v-if="buildKind">
+          <div class="seg" role="group" aria-label="切换构建产物">
+            <span class="seg-label">产物</span>
+            <button
+              v-for="item in BUILDS"
+              :key="item.key"
+              type="button"
+              :class="{ active: buildKind === item.key }"
+              :aria-pressed="buildKind === item.key"
+              :title="item.title"
+              @click="switchBuild(item.key)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
 
-        <span class="divider" aria-hidden="true"></span>
+          <span class="divider" aria-hidden="true"></span>
+        </template>
 
         <a
           class="link"
