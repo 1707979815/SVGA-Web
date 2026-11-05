@@ -9,7 +9,7 @@
 
 - **结构化错误**：新增 `SvgaError`（`Error` 子类，带 `code` 字段）与 13 个错误码（`NETWORK` / `DECOMPRESS` / `INVALID_PROTOCOL` / `DECODE` / `EMPTY_BUFFER` / `INVALID_BUFFER` / `IMAGE_DECODE` / `TIMEOUT` / `PARSE_FAILED` / `WORKER_ERROR` / `WORKER_RELEASED` / `CANVAS_CONTEXT` / `LOAD_FAILED`），错误码在 worker 回包中透传、主线程还原，跨线程不丢；入口对外提供 `SvgaError`（类）、`isSvgaError`（类型收窄）与 `ErrorCode`（错误码类型），其余工具函数留在内部；错误对象对外只保留 `code` / `message` / `tips` 三个字段（`message` 自动带 `[SVGA error]` 前缀便于日志定位，`tips` 为稳定中文提示语，可直接展示），`cause` 作为原始异常供排查。`SvgaError` 仍是 `Error` 子类，既有写法不受影响。
 - `PlayConfig.maxDpr`：画布 DPR 上限，画布后备存储按 `min(devicePixelRatio, maxDpr)` 出图，`0` / 不传不限制。大画布、低端机可显著降低每帧光栅化像素与帧缓存内存。三处尺寸计算统一走 `Renderer.resolveScale()`，`setConfig` 修改后即时重算画布。
-- 在线演示（GitHub Pages）：<https://1707979815.github.io/custom-svga/>，含展示页与单实例 / 多实例回归页。
+- 在线演示（GitHub Pages）：<https://1707979815.github.io/SVGA-Web/>，含展示页与单实例 / 多实例回归页。
 - 新增无状态渲染原语模块 `src/render/primitives.ts`：源尺寸到画布的缩放映射、形状 `Path2D` 与样式绘制、离屏画布与 2D 上下文获取、动态文本样式归一。仅 `src/render/` 内引用，**不进公共 API**。
 - 冒烟回归从 10 项扩到 12 项：新增 `Parser` 实例语义（实例与静态共享全局缓存、`cache: false` 仍复用带 key 的在途任务、`destroy()` 立即驳回在途任务）与 `play(config)` 配置持久化 + 自然结束事件顺序（`onLoopEnd → onEnd → onStop`）断言。
 

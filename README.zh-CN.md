@@ -10,7 +10,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/custom-svga)](https://www.npmjs.com/package/custom-svga)
 [![minzipped size](https://img.shields.io/bundlephobia/minzip/custom-svga)](https://bundlephobia.com/package/custom-svga)
 [![license](https://img.shields.io/npm/l/custom-svga)](https://www.npmjs.com/package/custom-svga)
-[![GitHub stars](https://img.shields.io/github/stars/1707979815/custom-svga?style=social&label=Star)](https://github.com/1707979815/custom-svga)
+[![GitHub stars](https://img.shields.io/github/stars/1707979815/SVGA-Web?style=social&label=Star)](https://github.com/1707979815/SVGA-Web)
 
 ```
 同构内联 Worker · 动态精灵/文本替换 · 抽帧渲染 · DPR 上限 · 可摇树
@@ -19,7 +19,7 @@
 </div>
 
 <!-- TODO: 录屏后替换为真实 GIF：![preview](./docs/preview.gif) -->
-**[在线演示](https://1707979815.github.io/custom-svga/)** —— 展示页、单实例回归页与多实例压力页。
+**[在线演示](https://1707979815.github.io/SVGA-Web/)** —— 展示页、单实例回归页与多实例压力页。
 
 - **同构内联 Worker 解析**：真实 Web Worker 可用时自动在 Worker 内解析；不支持/受限时主线程 `MockWorker`（沙箱 `new Function`）复用同一份代码降级，零配置。
 - **构建期内联**：解析代码在打包时编译为字符串内联进主包，单入口、无独立 worker 产物、无需额外部署 worker 文件。
@@ -425,12 +425,12 @@ player.clearDynamic()                                                    // 清�
 ## 相关链接
 
 - npm：<https://www.npmjs.com/package/custom-svga>
-- 在线演示：<https://1707979815.github.io/custom-svga/>
-- 问题反馈与需求：<https://github.com/1707979815/custom-svga/issues>
+- 在线演示：<https://1707979815.github.io/SVGA-Web/>
+- 问题反馈与需求：<https://github.com/1707979815/SVGA-Web/issues>
 - 源码：未公开，本项目以 npm 包与在线演示的形式发布
 
 ## License
 
 MIT © [DreamLife(Zhou)](https://github.com/1707979815)
 
-**如果觉得好用，欢迎 [Star](https://github.com/1707979815/custom-svga) ⭐，也欢迎提交 Issue / PR。**
+**如果觉得好用，欢迎 [Star](https://github.com/1707979815/SVGA-Web) ⭐，也欢迎提交 Issue / PR。**

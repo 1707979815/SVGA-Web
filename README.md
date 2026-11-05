@@ -10,7 +10,7 @@ An SVGA animation player for Vue 3 & modern web — **13.3KB gzip, zero runtime 
 [![npm downloads](https://img.shields.io/npm/dm/custom-svga)](https://www.npmjs.com/package/custom-svga)
 [![minzipped size](https://img.shields.io/bundlephobia/minzip/custom-svga)](https://bundlephobia.com/package/custom-svga)
 [![license](https://img.shields.io/npm/l/custom-svga)](https://www.npmjs.com/package/custom-svga)
-[![GitHub stars](https://img.shields.io/github/stars/1707979815/custom-svga?style=social&label=Star)](https://github.com/1707979815/custom-svga)
+[![GitHub stars](https://img.shields.io/github/stars/1707979815/SVGA-Web?style=social&label=Star)](https://github.com/1707979815/SVGA-Web)
 
 ```
 Isomorphic inline worker · Dynamic sprite/text replacement · Frame throttling · DPR cap · Tree-shakable
@@ -19,7 +19,7 @@ Isomorphic inline worker · Dynamic sprite/text replacement · Frame throttling 
 </div>
 
 <!-- TODO: 录屏后替换为真实 GIF：![preview](./docs/preview.gif) -->
-**[Live Demo](https://1707979815.github.io/custom-svga/)** — showcase, single-instance regression and multi-instance stress playground.
+**[Live Demo](https://1707979815.github.io/SVGA-Web/)** — showcase, single-instance regression and multi-instance stress playground.
 
 - **Isomorphic inline worker parsing**: parses in a real Web Worker when available; otherwise falls back to a main-thread `MockWorker` (sandboxed `new Function`) running the exact same code — zero configuration.
 - **Build-time inlining**: the worker is compiled into a string at build time and inlined into the bundle. Single entry, no separate worker files, no runtime dependencies (`fflate` is inlined too).
@@ -424,12 +424,12 @@ See [CHANGELOG.md](./CHANGELOG.md).
 ## Links
 
 - npm: <https://www.npmjs.com/package/custom-svga>
-- Live demo: <https://1707979815.github.io/custom-svga/>
-- Issues & feature requests: <https://github.com/1707979815/custom-svga/issues>
+- Live demo: <https://1707979815.github.io/SVGA-Web/>
+- Issues & feature requests: <https://github.com/1707979815/SVGA-Web/issues>
 - Source: not published — the library ships as an npm package, with the live demo as the reference implementation
 
 ## License
 
 MIT © [DreamLife(Zhou)](https://github.com/1707979815)
 
-**If this project helps you, a [Star](https://github.com/1707979815/custom-svga) ⭐ is appreciated. Issues and PRs are welcome!**
+**If this project helps you, a [Star](https://github.com/1707979815/SVGA-Web) ⭐ is appreciated. Issues and PRs are welcome!**

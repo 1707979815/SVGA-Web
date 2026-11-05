@@ -1,6 +1,6 @@
 # custom-svga online demo
 
-Source of the online demo: **https://1707979815.github.io/custom-svga/**
+Source of the online demo: **https://1707979815.github.io/SVGA-Web/**
 
 - Vue 3 + Vite + TypeScript + SCSS, using the published [`custom-svga`](https://www.npmjs.com/package/custom-svga) package from npm.
 - Single-instance regression page & multi-instance stress playground: dynamic sprite/text replacement, poster, frame range, frame throttling, DPR cap, etc.

@@ -141,7 +141,7 @@ function switchBuild(kind: BuildKind) {
 
         <a
           class="link"
-          href="https://github.com/1707979815/custom-svga"
+          href="https://github.com/1707979815/SVGA-Web"
           target="_blank"
           rel="noreferrer"
           title="GitHub 仓库"
