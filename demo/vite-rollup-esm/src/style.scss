@@ -8,6 +8,12 @@
   --ok: #3ddc84;
   --warn: #ffb454;
   --err: #ff5c5c;
+
+  /* 统一描边与圆角：各页面/组件只引用变量，不要再散落硬编码色值 */
+  --line: #242b3d;
+  --line-strong: #33405c;
+  --radius: 12px;
+  --radius-sm: 8px;
 }
 
 * {
@@ -25,4 +31,22 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 表单控件默认不继承字体，统一显式继承，避免按钮/输入框字号与页面不一致 */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+::selection {
+  background: rgba(79, 140, 255, 0.35);
+}
+
+:focus-visible {
+  outline: 2px solid rgba(79, 140, 255, 0.55);
+  outline-offset: 2px;
 }

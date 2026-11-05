@@ -103,7 +103,7 @@ API 有意保持接近，多数项目只需要改「加载入口」和「播放�
 |---|---|---|
 | `new SVGA.Player(canvas)` | `new Player(canvas \| div, config?)` | 传容器 `div` 时 canvas 由库自动创建与管理 |
 | `new SVGA.Parser()` + `parser.load(url, cb)` | `await Parser.loadUrl(url)` | Promise 化，共用 Worker，内置 LRU 缓存 |
-| `player.setVideoItem(item)` | 同名 | 也可直接传 `{ url, ...解析选项 }` |
+| `player.setVideoItem(item)` | 同名 | 只接受 `Parser` 的解析结果；下载 / 解析请先走 `Parser.loadUrl` |
 | `player.startAnimation()` | `player.play(config?)` | 配置通过参数传入，而非实例属性 |
 | `player.pauseAnimation()` | `player.pause()` | |
 | `player.stopAnimation()` | `player.stop()` | 按 `fillMode` 决定停在末帧/首帧/清空 |
@@ -138,7 +138,7 @@ new Player(element, config?)
 
 | 方法 | 返回值 | 说明 |
 |---|---|---|
-| `setVideoItem(MovieData \| VideoUrlSource)` | `Promise<void>` | 装载动画数据。可传 `Parser` 的解析结果，或 `{ url, ...解析选项 }` 让实例内部加载（`useWorker` / `cache` / `useImageBitmap` 平铺在顶层）。失败时触发 `onError` 并回落到 `defaultPoster`。 |
+| `setVideoItem(movie)` | `Promise<void>` | 装载 `Parser` 的解析结果（`MovieData`）。装载失败先回落到 `defaultPoster`，再按「有 `onError` 监听就只回调、无监听才 reject」的单一通道报错。 |
 | `play(config?)` | `void` | 开始 / 恢复播放。传入的 `config` 会**持久写入**实例。上一次自然循环结束后再调用，会从区间进入帧重新开始。 |
 | `setConfig(config?)` | `void` | 仅更新配置，不触发播放；播放中同样即时生效（`frameThrottling` 下一帧生效）。 |
 | `playRange(startFrame, endFrame, config?)` | `void` | 播放指定帧区间，等价于 `setConfig({ startFrame, endFrame })` + `play()`。 |
@@ -245,7 +245,7 @@ await queryMemoryInfo(url, true)       // log=true 打印表格
 |---|---|---|
 | `useWorker` | `true` | 传 `false` 时强制走同构 `MockWorker` 在主线程解析（同一份代码，不占线程） |
 | `cache` | `true` | 是否写入全局 20 条 LRU 缓存 |
-| `useImageBitmap` | `false` | 是否解码为 `ImageBitmap`（绘制更快，但淘汰时需要显式 `close()` 释放） |
+| `useImageBitmap` | `false` | 是否解码为 `ImageBitmap`（绘制更快，但淘汰时需要显式 `close()` 释放）；环境缺少 `createImageBitmap` 时自动降级为主线程 `HTMLImageElement`，不会失显 |
 | `movieDataId` | - | 显式缓存键。缓冲解析想进缓存必须传它；实例形态下同时作为实例级缓存键 |
 | `autoClose` | `false` | 仅实例可用：每次解析成功后释放 Worker，适合低频 / 一次性解析 |
 
@@ -287,7 +287,7 @@ const info = await queryMemoryInfo(url, true) // log = false 可关闭 console.t
 | 时机 | 原因 |
 |---|---|
 | 实例创建后、`setVideoItem` 之前 | 容器先显示封面，而不是一个空盒子 |
-| `setVideoItem` 下载 / 解析失败 | 弱网、404、跨域失败；同时会触发 `onError` |
+| `setVideoItem` 装载失败 | 传入数据不合法等；同时会触发 `onError`。下载 / 解析失败发生在 `Parser`，需自行用 `renderPoster` 兜底 |
 | `stop()` 且 `fillMode: 'clear'` | 画布被清空，海报回填画面 |
 | `clear()` 之后 | 动画数据已清空但实例还在，海报接替画面 |
 | 未播放时 `setConfig({ defaultPoster })` | 换图后立刻重绘 |
@@ -361,6 +361,44 @@ player.setConfig({ defaultPoster: 'https://example.com/cover-2.png' })
 - Worker 不可用 / 创建失败 → `new MockWorker(code)`：沙箱 `new Function('self', 'globalThis', 'postMessage', 'importScripts', code)` 主线程同构解析。
 - 解析带 30s 超时与 `onerror` 自愈兜底，避免 Promise 悬挂。静态方法共用共享 Worker；`new Parser()` 每个实例持有独立 Worker，`useWorker` 模式切换会重建 Worker。
 - ⚠️ MockWorker 依赖 `new Function`，严格 CSP（无 `unsafe-eval`）环境下无法降级；真实 Worker 需允许 `blob:`。
+
+## 错误处理
+
+所有解析 / 运行期失败统一抛 `SvgaError` —— 它是 `Error` 的子类，带一个稳定的 `code`，业务侧按码分支即可，不必匹配错误文案。
+
+| 错误码 | 触发场景 | 建议处理 |
+|---|---|---|
+| `NETWORK` | `fetch` 失败，或 HTTP 响应非 2xx | 重试，或保持海报 |
+| `DECOMPRESS` | zlib 数据损坏 | 视为素材损坏，上报 |
+| `INVALID_PROTOCOL` | 解码结果缺少基础 `params` | 不是合法 SVGA 文件 |
+| `DECODE` | protobuf 字段解码失败（varint 溢出、未知 wire type） | 同上 |
+| `EMPTY_BUFFER` / `INVALID_BUFFER` | 缓冲为空，或短于魔数长度 | 调用方问题，检查入参 |
+| `IMAGE_DECODE` | 图片字节无法解码为 `HTMLImageElement` | 素材或图片本身有问题 |
+| `TIMEOUT` | 解析超过 30s | 重试一次，仍失败则放弃 |
+| `WORKER_ERROR` | worker 崩溃或被环境阻断 | 重试（下次解析会按需重建 worker） |
+| `WORKER_RELEASED` | 解析途中 worker 被主动释放 | 重试，或等下次解析复用 |
+| `PARSE_FAILED` | worker 返回的未归类失败 | 通用降级 |
+| `CANVAS_CONTEXT` | 取不到 2D 上下文 | 无法渲染，回落到静态图 |
+| `LOAD_FAILED` | `setVideoItem` 装载失败（数据不合法等） | 检查素材后重新解析装载 |
+
+```ts
+import { isSvgaError } from 'custom-svga'
+
+player.onError(err => {
+  if (!isSvgaError(err)) return
+  toast(err.tips) // 可直接展示的中文提示，如「动画资源下载失败，请检查网络后重试」
+  if (err.code === 'NETWORK') return retryLater()
+  if (err.code === 'DECOMPRESS' || err.code === 'INVALID_PROTOCOL') {
+    return reportBrokenAsset(err.code, err.cause)
+  }
+})
+```
+
+- **`setVideoItem` 只走一条错误通道**：注册了 `onError` 就只回调事件、Promise 正常 resolve；没注册 `onError` 才 reject（避免失败被静默吞掉）。业务侧二选一即可，不会既回调又抛错。
+- **错误码跨线程不丢**：worker 在回包里带上 `code`，主线程还原成 `SvgaError`，因此解析器内部抛出的错误与主线程抛出的错误带同样的码。
+- **中文提示**：错误对象对外就是三件事 —— `code`（错误码）、`message`（排查细节，自动带 `[SVGA error] ` 前缀）、`tips`（中文提示语，说明 + 建议）。给用户看的提示直接用 `err.tips`；`err.cause` 是原始异常，排查时再看。
+- `SvgaError` 仍然是 `Error`，既有的 `catch (e) { e.message }` 写法完全不受影响。
+- 入口对外只提供 `SvgaError`（类）、`isSvgaError`（类型收窄）与 `ErrorCode`（`code` 的类型），其余工具函数留在内部，不进入公共 API。
 
 ## 动态替换示例
 

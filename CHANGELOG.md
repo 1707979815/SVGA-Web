@@ -3,15 +3,22 @@
 记录 custom-svga 的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 日期以 npm 实际发布时间为准。1.x 为旧架构（离屏渲染），已归档 `versions/`，不再逐版本展开。
 
-## [2.4.0] - 2026-11-04
+## [2.4.0] - 2026-11-05
 
 ### Added
 
+- **结构化错误**：新增 `SvgaError`（`Error` 子类，带 `code` 字段）与 13 个错误码（`NETWORK` / `DECOMPRESS` / `INVALID_PROTOCOL` / `DECODE` / `EMPTY_BUFFER` / `INVALID_BUFFER` / `IMAGE_DECODE` / `TIMEOUT` / `PARSE_FAILED` / `WORKER_ERROR` / `WORKER_RELEASED` / `CANVAS_CONTEXT` / `LOAD_FAILED`），错误码在 worker 回包中透传、主线程还原，跨线程不丢；入口对外提供 `SvgaError`（类）、`isSvgaError`（类型收窄）与 `ErrorCode`（错误码类型），其余工具函数留在内部；错误对象对外只保留 `code` / `message` / `tips` 三个字段（`message` 自动带 `[SVGA error]` 前缀便于日志定位，`tips` 为稳定中文提示语，可直接展示），`cause` 作为原始异常供排查。`SvgaError` 仍是 `Error` 子类，既有写法不受影响。
 - `PlayConfig.maxDpr`：画布 DPR 上限，画布后备存储按 `min(devicePixelRatio, maxDpr)` 出图，`0` / 不传不限制。大画布、低端机可显著降低每帧光栅化像素与帧缓存内存。三处尺寸计算统一走 `Renderer.resolveScale()`，`setConfig` 修改后即时重算画布。
 - 在线演示（GitHub Pages）：<https://1707979815.github.io/custom-svga/>，含展示页与单实例 / 多实例回归页。
+- 新增无状态渲染原语模块 `src/render/primitives.ts`：源尺寸到画布的缩放映射、形状 `Path2D` 与样式绘制、离屏画布与 2D 上下文获取、动态文本样式归一。仅 `src/render/` 内引用，**不进公共 API**。
+- 冒烟回归从 10 项扩到 12 项：新增 `Parser` 实例语义（实例与静态共享全局缓存、`cache: false` 仍复用带 key 的在途任务、`destroy()` 立即驳回在途任务）与 `play(config)` 配置持久化 + 自然结束事件顺序（`onLoopEnd → onEnd → onStop`）断言。
 
 ### Changed
 
+- **渲染层合并为单一 `Renderer`**：原 `Renderer.ts`（海报/尺寸/Observer/Ticker）与 `RendererCore.ts`（播放状态机/绘制）的父子继承拆分合入一个类，去掉 `super` 转发与 `setConfig` 虚分发（此前 `play(config)` 存在配置被重复应用的风险）；`onEnd` / `loopEnded` / 自然结束重播等语义保持不变。
+- **缩放适配统一为 `computeFitTransform`**：海报绘制与 viewBox 精灵共用同一套 `Fill` / `AspectFit` / `AspectFill` 算法；`AspectFill` 由「裁源子矩形」改为「等比居中铺满 + 超出部分由画布裁剪」，两者源到目标的坐标映射等价，产物体积不变。
+- **`Parser` 改为继承私有 `ParseSession` 基类**：静态方法与会话默认实例共用同一份缓存键推导、默认值解析（`cache !== false` / `useImageBitmap ?? false` / `useWorker ?? true`）与 `autoClose` 编排，实例不再维护一套镜像转发方法；实例解析配置仍在构造时一次性声明。
+- **`MovieCache` 收敛导出面**：只对外提供 `loadWithCache` / `deleteCache` / `clearCache`，`setCache` / `touchCache` / 在途任务（`pendingLoads`）系列转为模块私有，避免外部误用缓存内部状态。
 - README 双语化重写：补充与官方 `svgaplayerweb` / `svga.lite` 的对比表、迁移指南与体积说明。
 - 补充 `LICENSE` 与 `CHANGELOG.md`，随 npm 包一并分发。
 - `package.json` 收尾：`exports.default` 指向 ESM 产物（此前指向 UMD），精简 `keywords`，`homepage` 指向在线演示。

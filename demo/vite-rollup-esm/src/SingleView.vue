@@ -559,9 +559,8 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .layout {
-  max-width: 1020px;
-  margin: 0 auto;
-  padding: 24px 20px 48px;
+  /* 宽度与左右留白由 App 的 .shell 统一负责，页面只留纵向节奏 */
+  padding: 24px 0 48px;
 }
 
 .toolbar {

@@ -10,10 +10,10 @@ import type { MovieData, DynamicText } from './svga'
  * 每个实例可独立选择动效源（URL/文件）、注入动态文本/图片/海报/兜底静态图，
  * 并单独执行播放/暂停/停止/销毁。
  * 用于验证多实例同时播放下各实例独立 RAF 的帧率/循环统计，
- * 以及各实例独立 Path2D 缓存（RendererCore 方案1）在多实例场景下的表现。
+ * 以及各实例独立 Path2D 缓存（Renderer 实例内的 shapeCache）在多实例场景下的表现。
  */
 
-/** 默认素材取自公共素材列表：dev 下走 vite 代理，静态部署（GitHub Pages）下走 public 同源文件 */
+/** 默认素材取自公共素材列表：dev 与静态部署（GitHub Pages）都读 public/svga 下的同源文件 */
 
 /** 单实例运行时状态（player 不放响应式对象里，避免 Vue unwrap 类型干扰，单独用 Map 存储） */
 interface Item {
@@ -60,8 +60,15 @@ function log(msg: string, level: 'info' | 'ok' | 'warn' | 'err' = 'info') {
   if (logs.value.length > 200) logs.value.length = 200
 }
 
+/** 清空运行日志 */
+function clearLogs() {
+  logs.value = []
+}
+
 const hasPlayers = computed(() => items.value.length > 0)
 const hasLoaded = computed(() => items.value.some(i => i.ready))
+/** 是否所有实例都处于「跳过渲染」状态（仅用于批量按钮的高亮反馈） */
+const allSkipping = computed(() => items.value.length > 0 && items.value.every(i => i.skipRenderOn))
 
 /** 收集 v-for 渲染的 canvas 节点到对应实例 */
 function setCanvas(item: Item, el: unknown) {
@@ -408,36 +415,58 @@ onBeforeUnmount(() => {
       <option v-for="option in ASSET_OPTIONS" :key="option.url" :value="option.url">{{ option.label }}</option>
     </datalist>
 
-    <!-- 批量配置 -->
-    <section class="panel">
-      <div class="form-grid">
-        <label class="field">
-          <span>批量 URL 模式</span>
-          <select v-model="urlMode">
-            <option value="shared">统一 URL（共享一次解析）</option>
-            <option value="separate">独立 URL（每实例各自解析）</option>
-          </select>
-        </label>
-        <div v-if="urlMode === 'shared'" class="field grow">
-          <AssetPicker v-model="sharedUrl" label="统一资源地址" placeholder="SVGA URL，可直接输入外链" />
+    <!-- 批量配置与批量控制 -->
+    <section class="controls">
+      <div class="ctrl">
+        <div class="ctrl-head">
+          <h2>批量创建</h2>
+          <p>统一 URL 只解析一次并共享给所有实例；独立 URL 模式在创建后逐个填写。</p>
         </div>
-        <label class="field">
-          <span>初始实例数</span>
-          <select v-model.number="createCount">
-            <option v-for="n in [1, 2, 4, 8, 12, 16, 24, 32]" :key="n" :value="n">{{ n }}</option>
-          </select>
-        </label>
+        <div class="ctrl-row">
+          <label class="field">
+            <span>URL 模式</span>
+            <select v-model="urlMode">
+              <option value="shared">统一 URL（共享一次解析）</option>
+              <option value="separate">独立 URL（每实例各自解析）</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>实例数</span>
+            <select v-model.number="createCount">
+              <option v-for="n in [1, 2, 4, 8, 12, 16, 24, 32]" :key="n" :value="n">{{ n }}</option>
+            </select>
+          </label>
+          <div class="field-actions">
+            <button class="btn primary" @click="createBatch">创建 {{ createCount }} 个实例</button>
+            <button class="btn" @click="addOne">添加一个实例</button>
+          </div>
+        </div>
+        <AssetPicker
+          v-if="urlMode === 'shared'"
+          v-model="sharedUrl"
+          class="picker"
+          label="统一资源地址"
+          placeholder="SVGA URL，可直接输入外链"
+        />
+        <p v-else class="note">独立 URL 模式：创建后在各实例卡片内分别填写地址或选择本地文件。</p>
       </div>
-      <div class="panel-actions">
-        <button class="btn primary" @click="createBatch">创建 {{ createCount }} 个实例</button>
-        <button class="btn" @click="addOne">添加一个实例</button>
-        <button class="btn" :disabled="!hasPlayers" @click="loadAll">批量加载</button>
-        <button class="btn" :disabled="!hasLoaded" @click="playAll">全部播放</button>
-        <button class="btn" :disabled="!hasPlayers" @click="pauseAll">全部暂停</button>
-        <button class="btn" :disabled="!hasPlayers" @click="stopAll">全部停止</button>
-        <button class="btn" :disabled="!hasPlayers" @click="toggleSkipRenderAll">全部跳过渲染</button>
-        <button class="btn" :disabled="!hasPlayers" @click="toggleFoldAll">{{ allFolded ? '全部展开面板' : '全部折叠面板' }}</button>
-        <button class="btn danger" @click="destroyAll">销毁全部</button>
+
+      <div class="ctrl">
+        <div class="ctrl-head">
+          <h2>批量控制</h2>
+          <p>对当前全部实例生效；单实例操作在各自卡片内。</p>
+        </div>
+        <div class="ctrl-row">
+          <button class="btn" :disabled="!hasPlayers" @click="loadAll">批量加载</button>
+          <span class="vr" aria-hidden="true"></span>
+          <button class="btn" :disabled="!hasLoaded" @click="playAll">全部播放</button>
+          <button class="btn" :disabled="!hasPlayers" @click="pauseAll">全部暂停</button>
+          <button class="btn" :disabled="!hasPlayers" @click="stopAll">全部停止</button>
+          <span class="vr" aria-hidden="true"></span>
+          <button class="btn" :class="{ active: allSkipping }" :disabled="!hasPlayers" @click="toggleSkipRenderAll">全部跳过渲染</button>
+          <button class="btn" :disabled="!hasPlayers" @click="toggleFoldAll">{{ allFolded ? '全部展开' : '全部折叠' }}</button>
+          <button class="btn danger push" :disabled="!hasPlayers" @click="destroyAll">销毁全部</button>
+        </div>
       </div>
     </section>
 
@@ -515,17 +544,22 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="console">
-      <template v-for="(l, i) in logs" :key="i"><div class="line">{{ l }}</div></template>
-      <div v-if="!logs.length" class="line muted">暂无日志…</div>
+      <div class="console-head">
+        <h2>运行日志</h2>
+        <button class="btn mini" :disabled="!logs.length" @click="clearLogs">清空</button>
+      </div>
+      <div class="console-body" aria-live="polite">
+        <template v-for="(l, i) in logs" :key="i"><div class="line">{{ l }}</div></template>
+        <div v-if="!logs.length" class="line muted">暂无日志…</div>
+      </div>
     </section>
   </main>
 </template>
 
 <style scoped lang="scss">
 .layout {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 24px 20px 48px;
+  /* 宽度与左右留白由 App 的 .shell 统一负责，页面只留纵向节奏 */
+  padding: 24px 0 48px;
 }
 
 .toolbar {
@@ -533,69 +567,163 @@ onBeforeUnmount(() => {
   .sub { margin: 0; color: var(--muted); font-size: 13px; }
 }
 
-.panel {
-  margin-top: 12px;
+/* ---------- 批量操作面板：两块分组，避免一长排按钮 ---------- */
+.controls {
+  margin-top: 14px;
   background: var(--panel);
-  border: 1px solid #242b3d;
-  border-radius: 10px;
-  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.ctrl {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 14px 16px;
+
+  & + & {
+    border-top: 1px solid var(--line);
+  }
 }
 
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px 14px;
-  align-items: end;
-  width: 100%;
-}
-
-.panel-actions {
+.ctrl-head {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+
+  h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+  }
+}
+
+.ctrl-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 10px;
-  align-items: center;
-  width: 100%;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   font-size: 12px;
   color: var(--muted);
-  flex: 1 1 180px;
-  min-width: 120px;
-  &.grow { flex: 2 1 360px; }
-  input, select {
+
+  select,
+  input {
+    height: 34px;
+    padding: 0 10px;
     background: var(--panel-2);
     border: 1px solid #2c3345;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     color: var(--text);
-    padding: 8px 10px;
     font-size: 13px;
-    width: 100%;
-    &:focus { outline: none; border-color: var(--accent); }
+
+    &:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+  }
+
+  select {
+    min-width: 210px;
   }
 }
 
+.field-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.picker {
+  width: 100%;
+}
+
+.note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.vr {
+  width: 1px;
+  height: 22px;
+  margin: 0 2px;
+  background: var(--line);
+}
+
+.push {
+  margin-left: auto;
+}
+
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 14px;
   background: var(--panel-2);
   border: 1px solid #2c3345;
+  border-radius: var(--radius-sm);
   color: var(--text);
-  border-radius: 6px;
-  padding: 8px 14px;
   font-size: 13px;
-  cursor: pointer;
   white-space: nowrap;
-  &:hover { border-color: var(--accent); }
-  &:disabled { opacity: 0.5; cursor: not-allowed; }
-  &.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  &.danger { color: #ffb4b4; border-color: #6b2b2b; &:hover { border-color: #ff8a8a; } }
-  &.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-  &.mini { padding: 5px 10px; font-size: 12px; }
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+
+  &:hover:not(:disabled) {
+    border-color: var(--line-strong);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  &.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+
+    &:hover:not(:disabled) {
+      filter: brightness(1.08);
+    }
+  }
+
+  &.danger {
+    color: #ffb4b4;
+    border-color: #5c2a2a;
+
+    &:hover:not(:disabled) {
+      background: #2a1a1c;
+      border-color: #ff8a8a;
+    }
+  }
+
+  &.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  &.mini {
+    height: 26px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
 }
 
 /* ---------- 实例卡片 ---------- */
@@ -691,15 +819,43 @@ onBeforeUnmount(() => {
 .console {
   margin-top: 16px;
   background: #0b0e14;
-  border: 1px solid #1e2432;
-  border-radius: 10px;
-  padding: 10px 12px;
+  border: 1px solid #1b2130;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.console-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  background: #0e131c;
+  border-bottom: 1px solid #1b2130;
+
+  h2 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+}
+
+.console-body {
   max-height: 220px;
   overflow: auto;
+  padding: 8px 12px;
   font-size: 12px;
   line-height: 1.7;
-  font-family: Consolas, Menlo, monospace;
-  .line { color: var(--text); }
-  .muted { color: var(--muted); }
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+
+  .line {
+    color: #b9c2d6;
+  }
+
+  .muted {
+    color: var(--muted);
+  }
 }
 </style>

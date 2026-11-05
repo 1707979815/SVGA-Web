@@ -103,7 +103,7 @@ The API is intentionally close, so most apps only change the loader and the play
 |---|---|---|
 | `new SVGA.Player(canvas)` | `new Player(canvas \| div, config?)` | pass a container `div` and the canvas is created for you |
 | `new SVGA.Parser()` + `parser.load(url, cb)` | `await Parser.loadUrl(url)` | promise-based, shared worker, LRU cache built in |
-| `player.setVideoItem(item)` | same | also accepts `{ url, ...parseOptions }` directly |
+| `player.setVideoItem(item)` | same | only accepts a `Parser` result; download / parse via `Parser.loadUrl` first |
 | `player.startAnimation()` | `player.play(config?)` | config is passed as an argument, not as properties |
 | `player.pauseAnimation()` | `player.pause()` | |
 | `player.stopAnimation()` | `player.stop()` | applies `fillMode` |
@@ -138,7 +138,7 @@ new Player(element, config?)
 
 | Method | Returns | Description |
 |---|---|---|
-| `setVideoItem(MovieData \| VideoUrlSource)` | `Promise<void>` | Load animation data. Pass a `MovieData` from `Parser`, or `{ url, ...parseOptions }` to load inside the player (`useWorker` / `cache` / `useImageBitmap` are flattened at the top level). Failures trigger `onError` and fall back to `defaultPoster`. |
+| `setVideoItem(movie)` | `Promise<void>` | Load a `MovieData` produced by `Parser`. On failure it falls back to `defaultPoster`, then reports through exactly one channel: `onError` when a listener is registered, a rejected promise when there is none. |
 | `play(config?)` | `void` | Start / resume playback. The config is **persisted** into the instance. If the previous run ended naturally, playback restarts from the range entry frame. |
 | `setConfig(config?)` | `void` | Update config only, never starts playback. Takes effect immediately even while playing (except `frameThrottling`, which applies on the next frame). |
 | `playRange(startFrame, endFrame, config?)` | `void` | Play a specific frame range — shorthand for `setConfig({ startFrame, endFrame })` + `play()`. |
@@ -245,7 +245,7 @@ await queryMemoryInfo(url, true)       // log=true prints a table
 |---|---|---|
 | `useWorker` | `true` | `false` forces main-thread parsing through the isomorphic `MockWorker` (same code, no thread) |
 | `cache` | `true` | Write results into the shared 20-entry LRU |
-| `useImageBitmap` | `false` | Decode images into `ImageBitmap` instead of `HTMLImageElement` (faster draw, needs explicit `close()` on eviction) |
+| `useImageBitmap` | `false` | Decode images into `ImageBitmap` instead of `HTMLImageElement` (faster draw, needs explicit `close()` on eviction). Falls back to `HTMLImageElement` on the main thread when `createImageBitmap` is unavailable, so nothing silently disappears |
 | `movieDataId` | - | Explicit cache key. Also enables caching for buffer-based parsing, which is otherwise anonymous and skipped |
 | `autoClose` | `false` | Instance only: release the Worker after each successful parse — ideal for rare, one-shot parses |
 
@@ -287,7 +287,7 @@ const info = await queryMemoryInfo(url, true) // log = false silences console.ta
 | Moment | Why |
 |---|---|
 | Right after construction, before `setVideoItem` | Container shows the cover instead of an empty box while the file loads |
-| `setVideoItem` fails to download / parse | Weak network, 404, CORS — `onError` fires at the same time |
+| `setVideoItem` fails to load | Invalid data etc. — `onError` fires at the same time. Download / parse failures happen in `Parser`, so draw a poster yourself via `renderPoster` |
 | `stop()` with `fillMode: 'clear'` | Canvas is cleared, poster refills it |
 | After `clear()` | Movie data is gone but the instance lives on, poster takes over |
 | `setConfig({ defaultPoster })` while not playing | New image is drawn immediately |
@@ -361,6 +361,43 @@ So the frame where `currentFrame === endFrame` is always painted before the wrap
 - Worker unavailable / failed to construct → `new MockWorker(code)`: isomorphic main-thread parsing in a `new Function('self', 'globalThis', 'postMessage', 'importScripts', code)` sandbox.
 - Parsing has a 30s timeout and self-healing `onerror` handling to avoid hanging promises. Static methods share one Worker; each `new Parser()` instance owns a dedicated Worker, and switching `useWorker` recreates it.
 - ⚠️ MockWorker relies on `new Function`, so the fallback is unavailable under strict CSP (without `unsafe-eval`); real Workers require `blob:` to be allowed.
+
+## Error handling
+
+Every parsing / runtime failure is thrown as `SvgaError` — an `Error` subclass carrying a stable `code`, so you can branch on the failure type instead of matching message strings.
+
+| Code | When it happens | Typical handling |
+|---|---|---|
+| `NETWORK` | `fetch` failed, or HTTP response is not 2xx | retry, or keep the poster |
+| `DECOMPRESS` | zlib payload is corrupted | treat the asset as broken, report it |
+| `INVALID_PROTOCOL` | decoded entity has no `params` | not a valid SVGA file |
+| `DECODE` | protobuf field decoding failed (varint overflow, unknown wire type) | same as above |
+| `EMPTY_BUFFER` / `INVALID_BUFFER` | empty buffer, or shorter than the magic header | caller bug — check the input |
+| `IMAGE_DECODE` | image bytes could not be decoded into `HTMLImageElement` | asset issue |
+| `TIMEOUT` | parsing exceeded 30s | retry once, then give up |
+| `WORKER_ERROR` | worker crashed or was blocked by the environment | retry — a new worker is created on demand |
+| `WORKER_RELEASED` | worker released while a parse was in flight | retry, or reuse after the next parse |
+| `PARSE_FAILED` | unclassified worker failure | generic fallback |
+| `CANVAS_CONTEXT` | 2D context unavailable | cannot render — show a static image |
+| `LOAD_FAILED` | `setVideoItem` failed to load the data (e.g. invalid movie) | check the asset, then parse and load again |
+
+```ts
+import { isSvgaError } from 'custom-svga'
+
+player.onError(err => {
+  if (!isSvgaError(err)) return
+  if (err.code === 'NETWORK') return retryLater()
+  if (err.code === 'DECOMPRESS' || err.code === 'INVALID_PROTOCOL') {
+    return reportBrokenAsset(err.code, err.cause)
+  }
+})
+```
+
+- **`setVideoItem` uses a single error channel**: with an `onError` listener registered it only calls the event and the promise resolves; without one it rejects, so failures are never swallowed. You will not get both.
+- The codes survive the worker boundary: the worker serializes `code` next to the message, and the main thread restores it — so a failure raised inside the parser has the same `code` as one raised on the main thread.
+- An error exposes exactly three things you need: `code`, `message` (diagnostics, automatically prefixed with `[SVGA error] `) and `tips` (a stable human-readable Chinese hint: what happened + what to do). Use `err.tips` for UI copy; `err.cause` holds the original error for debugging.
+- `SvgaError` is still an `Error`; existing `catch (e) { e.message }` code keeps working.
+- The entry only ships `SvgaError` (class), `isSvgaError` (type guard) and `ErrorCode` (the type of `code`); the remaining helpers stay internal and are not part of the public API.
 
 ## Dynamic Replacement
 

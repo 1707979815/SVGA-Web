@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "custom-svga": "^2.3.1",
+    "custom-svga": "^2.4.0",
     "vue": "^3.4.0"
   },
   "devDependencies": {

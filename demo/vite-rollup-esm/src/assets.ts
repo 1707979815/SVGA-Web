@@ -27,7 +27,7 @@ export const ASSET_OPTIONS: AssetOption[] = [
   {
     label: '徽章（本地素材）',
     url: 'svga/newGuild/a-3-badge.svga',
-    note: '随 demo 分发：dev 走 vite 代理，部署后走 public 同源文件',
+    note: '随 demo 分发：dev 与部署都读 public/svga 下的同源文件',
   },
   {
     label: '矢量 · HamburgerArrow（本地）',
