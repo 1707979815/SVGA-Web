@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { Player, Parser, SCALE_MODE, demoInfo } from './svga'
+import AssetPicker from './AssetPicker.vue'
+import { DEFAULT_ASSET } from './assets'
 import type { MovieData, DynamicText } from './svga'
 
-/** 默认素材用相对路径：dev 下解析为 /svga/... 走 vite 代理，静态部署（GitHub Pages）下走 public 同源文件 */
-const DEFAULT_URL = 'svga/newGuild/a-3-badge.svga'
-
-const urlInput = ref(DEFAULT_URL)
+const urlInput = ref(DEFAULT_ASSET)
 const mainCanvas = ref<HTMLCanvasElement | null>(null)
 
 // —— 资源（URL / 点选文件 / 拖拽文件，主资源、动态图片、海报共用）——
@@ -151,6 +150,14 @@ function collectKeys(movieData?: MovieData): string[] {
 }
 
 // —— 文件获取（点选 / 拖拽）——
+/**
+ * 切资源地址（下拉预设或手输）时清掉已选文件：文件优先级高于 URL，
+ * 留着旧文件会让下拉选择看起来「没生效」。
+ */
+function onAssetChange() {
+  mainFile.value = null
+}
+
 function applyFile(target: SourceTarget, file: File) {
   if (target === 'main') mainFile.value = file
   else if (target === 'image') imageFile.value = file
@@ -392,10 +399,14 @@ onBeforeUnmount(() => {
     <!-- 资源 -->
     <section class="panel">
       <div class="form-grid">
-        <label class="field">
-          <span>资源地址</span>
-          <input v-model="urlInput" type="text" placeholder="SVGA 资源 URL" />
-        </label>
+        <div class="field asset-field">
+          <AssetPicker
+            v-model="urlInput"
+            label="资源地址"
+            placeholder="SVGA 资源 URL，可直接输入外链"
+            @update:model-value="onAssetChange"
+          />
+        </div>
       </div>
       <div class="panel-actions">
         <button class="btn" :disabled="busy" @click="fileInputMain?.click()">选择文件</button>
@@ -602,6 +613,11 @@ onBeforeUnmount(() => {
   gap: 12px 14px;
   align-items: end;
   width: 100%;
+}
+
+/* 素材选择器自带下拉 + 输入框 + 说明，独占一整行 */
+.asset-field {
+  grid-column: 1 / -1;
 }
 
 .panel-actions {

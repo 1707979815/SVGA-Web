@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onBeforeUnmount, nextTick } from 'vue'
 import { Player, Parser, SCALE_MODE } from './svga'
+import AssetPicker from './AssetPicker.vue'
+import { DEFAULT_ASSET, appendQuery } from './assets'
 import type { MovieData } from './svga'
 
 /**
@@ -9,8 +11,8 @@ import type { MovieData } from './svga'
  * 面板里最关键的一行是「历史最大帧号」：本包每轮都能到达 `总帧数 - 1`。
  */
 
-/** 对比素材 */
-const ASSET = 'svga/newGuild/a-3-badge.svga'
+/** 当前对比素材：两边同时换源，切换后重新开始对比 */
+const assetUrl = ref(DEFAULT_ASSET)
 /** 官方包 CDN 地址 */
 const OFFICIAL_CDN = 'https://cdn.jsdelivr.net/npm/svgaplayerweb@2.3.2/build/svga.min.js'
 
@@ -106,12 +108,12 @@ async function start() {
   officialState.value = '加载中'
   await nextTick()
 
-  const url = new URL(ASSET, location.href).href
+  const url = new URL(assetUrl.value.trim(), location.href).href
 
   /** 本包：解析 + 实例化 */
   const localStart = performance.now()
   try {
-    movie = await Parser.loadUrl(`${ASSET}?compare=${Date.now()}`)
+    movie = await Parser.loadUrl(appendQuery(assetUrl.value.trim(), 'compare', String(Date.now())))
     totalFrames.value = movie.params.frames || 0
     if (localCanvas.value) {
       localPlayer = new Player(localCanvas.value, { loop: 0, scaleMode: SCALE_MODE.ASPECT_FIT })
@@ -202,6 +204,17 @@ onBeforeUnmount(teardown)
         </p>
       </header>
 
+      <div class="asset-row">
+        <AssetPicker
+          v-model="assetUrl"
+          label="对比素材"
+          auto-apply
+          show-apply
+          apply-text="重载对比"
+          @apply="start"
+        />
+      </div>
+
       <div class="actions">
         <button class="primary" @click="start">开始 / 重载对比</button>
         <button @click="playBoth">同步播放</button>
@@ -269,6 +282,10 @@ onBeforeUnmount(teardown)
       color: var(--accent);
     }
   }
+}
+
+.asset-row {
+  margin-bottom: 12px;
 }
 
 .actions {

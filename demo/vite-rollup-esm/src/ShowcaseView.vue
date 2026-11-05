@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Player, Parser, SCALE_MODE, demoInfo } from './svga'
+import AssetPicker from './AssetPicker.vue'
+import { DEFAULT_ASSET } from './assets'
 import type { DynamicText, MovieData } from './svga'
 
 /**
@@ -10,8 +12,8 @@ import type { DynamicText, MovieData } from './svga'
  * 区别只是不展开全量参数面板，首屏以产品化文案 + 动效本体为主。
  */
 
-/** 展示素材：与回归页共用 public 下的同源文件 */
-const ASSET = 'svga/newGuild/a-3-badge.svga'
+/** 当前素材地址：可从预设列表切换，也可输入任意外链，切换后重建全部实例 */
+const assetUrl = ref(DEFAULT_ASSET)
 /** 多实例网格数量 */
 const GRID_SIZE = 12
 /** 动态文本预设 */
@@ -166,15 +168,42 @@ function toggleCache() {
   applyPerf()
 }
 
-/** 加载素材并挂载全部实例 */
+/** 销毁全部实例（切换素材与卸载时都要清干净，避免旧实例的 RAF 残留） */
+function destroyPlayers() {
+  heroPlayer?.destroy()
+  heroPlayer = null
+  dynPlayer?.destroy()
+  dynPlayer = null
+  ctrlPlayer?.destroy()
+  ctrlPlayer = null
+  perfPlayer?.destroy()
+  perfPlayer = null
+  gridPlayers.forEach(player => player.destroy())
+  gridPlayers.clear()
+}
+
+/** 按当前素材地址解析并挂载全部实例；切换素材时先销毁旧实例再重建 */
 async function mount() {
+  const url = assetUrl.value.trim()
+  if (!url) {
+    errorMsg.value = '请先选择或输入素材地址'
+    return
+  }
+  loading.value = true
+  errorMsg.value = ''
+  ctrlPlaying.value = false
+  ctrlFrame.value = 0
+  destroyPlayers()
+
+  let parsed: MovieData
   try {
-    movie = await Parser.loadUrl(ASSET)
+    parsed = await Parser.loadUrl(url)
   } catch (e) {
     errorMsg.value = e instanceof Error ? e.message : String(e)
     loading.value = false
     return
   }
+  movie = parsed
 
   movieFps.value = movie.params.fps || 20
   totalFrames.value = movie.params.frames || 0
@@ -226,22 +255,24 @@ async function mount() {
 onMounted(mount)
 
 onBeforeUnmount(() => {
-  heroPlayer?.destroy()
-  heroPlayer = null
-  dynPlayer?.destroy()
-  dynPlayer = null
-  ctrlPlayer?.destroy()
-  ctrlPlayer = null
-  perfPlayer?.destroy()
-  perfPlayer = null
-  gridPlayers.forEach(player => player.destroy())
-  gridPlayers.clear()
+  destroyPlayers()
   movie = null
 })
 </script>
 
 <template>
   <div class="showcase">
+    <div class="asset-bar">
+      <AssetPicker
+        v-model="assetUrl"
+        label="演示素材"
+        auto-apply
+        show-apply
+        apply-text="重新加载"
+        @apply="mount"
+      />
+    </div>
+
     <section class="hero">
       <div class="copy">
         <p class="eyebrow">SVGA ANIMATION PLAYER</p>
@@ -430,6 +461,13 @@ player.play()</code></pre>
   flex-direction: column;
   gap: 48px;
   padding: 32px 0 64px;
+}
+
+.asset-bar {
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid #242b3d;
+  border-radius: 12px;
 }
 
 .hero {

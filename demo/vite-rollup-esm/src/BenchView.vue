@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onBeforeUnmount, nextTick } from 'vue'
 import { Player, Parser, SCALE_MODE } from './svga'
+import AssetPicker from './AssetPicker.vue'
+import { DEFAULT_ASSET, appendQuery } from './assets'
 import { BenchRecorder, formatSample } from './bench'
 import type { BenchSample } from './bench'
 import type { MovieData } from './svga'
@@ -11,8 +13,8 @@ import type { MovieData } from './svga'
  * 指标口径与 `bench.ts` 注释一致，仅代表当前设备的相对表现，不是绝对性能承诺。
  */
 
-/** 测试素材（与其余页面同源） */
-const ASSET = 'svga/newGuild/a-3-badge.svga'
+/** 当前测试素材：可从预设列表切换，也可输入任意外链 */
+const assetUrl = ref(DEFAULT_ASSET)
 /** 单次采样窗口 */
 const SAMPLE_MS = 5000
 /** 可选实例数 */
@@ -98,7 +100,7 @@ async function run() {
 
   try {
     /** 加随机 query 绕过解析缓存，保证每次都是冷解析 */
-    const movie = await Parser.loadUrl(`${ASSET}?bench=${Date.now()}`)
+    const movie = await Parser.loadUrl(appendQuery(assetUrl.value.trim(), 'bench', String(Date.now())))
     phase.value = '播放采样中…'
     await nextTick()
     build(movie, recorder)
@@ -132,6 +134,7 @@ onBeforeUnmount(reset)
       </header>
 
       <div class="controls">
+        <AssetPicker v-model="assetUrl" label="测试素材" />
         <div class="row">
           <span class="label">实例数</span>
           <button

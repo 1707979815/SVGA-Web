@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onBeforeUnmount } from 'vue'
 import { Player, Parser, demoInfo } from './svga'
+import AssetPicker from './AssetPicker.vue'
+import { ASSET_OPTIONS, DEFAULT_ASSET } from './assets'
 import type { MovieData, DynamicText } from './svga'
 
 /**
@@ -11,8 +13,7 @@ import type { MovieData, DynamicText } from './svga'
  * 以及各实例独立 Path2D 缓存（RendererCore 方案1）在多实例场景下的表现。
  */
 
-/** 默认素材用相对路径：dev 下解析为 /svga/... 走 vite 代理，静态部署（GitHub Pages）下走 public 同源文件 */
-const DEFAULT_URL = 'svga/newGuild/a-3-badge.svga'
+/** 默认素材取自公共素材列表：dev 下走 vite 代理，静态部署（GitHub Pages）下走 public 同源文件 */
 
 /** 单实例运行时状态（player 不放响应式对象里，避免 Vue unwrap 类型干扰，单独用 Map 存储） */
 interface Item {
@@ -42,7 +43,7 @@ interface Item {
 }
 
 const urlMode = ref<'shared' | 'separate'>('shared')
-const sharedUrl = ref(DEFAULT_URL)
+const sharedUrl = ref(DEFAULT_ASSET)
 const createCount = ref(4)
 const items = ref<Item[]>([])
 /** 非响应式 Player 实例表：key 为实例 id */
@@ -177,7 +178,7 @@ async function createBatch() {
   destroyAll()
   const n = createCount.value
   for (let i = 0; i < n; i++) {
-    items.value.push(makeItem(urlMode.value === 'shared' ? '' : DEFAULT_URL))
+    items.value.push(makeItem(urlMode.value === 'shared' ? '' : DEFAULT_ASSET))
   }
   await nextTick()
   items.value.forEach(bindPlayer)
@@ -186,7 +187,7 @@ async function createBatch() {
 
 /** 追加单个实例 */
 function addOne() {
-  const item = makeItem(urlMode.value === 'shared' ? '' : DEFAULT_URL)
+  const item = makeItem(urlMode.value === 'shared' ? '' : DEFAULT_ASSET)
   items.value.push(item)
   nextTick(() => bindPlayer(item))
   log(`已追加实例 #${item.id}，请在卡片内加载动效`)
@@ -402,6 +403,11 @@ onBeforeUnmount(() => {
       <p class="sub">每个实例可独立选择动效（URL/文件）、注入动态文本/图片/海报/兜底静态图，并单独播放/暂停/停止/销毁</p>
     </header>
 
+    <!-- 素材预设：给各实例的 URL 输入框做 datalist（点选后仍可自由改写） -->
+    <datalist id="asset-presets">
+      <option v-for="option in ASSET_OPTIONS" :key="option.url" :value="option.url">{{ option.label }}</option>
+    </datalist>
+
     <!-- 批量配置 -->
     <section class="panel">
       <div class="form-grid">
@@ -412,10 +418,9 @@ onBeforeUnmount(() => {
             <option value="separate">独立 URL（每实例各自解析）</option>
           </select>
         </label>
-        <label v-if="urlMode === 'shared'" class="field grow">
-          <span>统一资源地址</span>
-          <input v-model="sharedUrl" type="text" placeholder="SVGA URL" />
-        </label>
+        <div v-if="urlMode === 'shared'" class="field grow">
+          <AssetPicker v-model="sharedUrl" label="统一资源地址" placeholder="SVGA URL，可直接输入外链" />
+        </div>
         <label class="field">
           <span>初始实例数</span>
           <select v-model.number="createCount">
@@ -451,7 +456,7 @@ onBeforeUnmount(() => {
         <div v-show="!item.folded" class="ops">
           <!-- 动效源 -->
           <div class="row">
-            <input v-model="item.url" :disabled="urlMode === 'shared'" type="text" class="input" placeholder="SVGA URL（统一模式自动取批量地址）" />
+            <input v-model="item.url" :disabled="urlMode === 'shared'" list="asset-presets" type="text" class="input" placeholder="SVGA URL（统一模式自动取批量地址）" />
             <label class="btn mini">选文件<input type="file" hidden accept=".svga" @change="onFilePicked(item, 'svga', $event)" /></label>
           </div>
 
