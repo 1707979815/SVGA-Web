@@ -377,7 +377,7 @@ onBeforeUnmount(() => {
   <main class="layout">
     <header class="toolbar">
       <h1>custom-svga · {{ demoInfo.name }} 产物回归测试</h1>
-      <p class="sub">入口：<code>dist/{{ demoInfo.entry }}</code> · 同构内联 Worker 解析（真实 Worker / 主线程 MockWorker 自动降级）</p>
+      <p class="sub">入口：<code>{{ demoInfo.entry }}</code> · 同构内联 Worker 解析（真实 Worker / 主线程 MockWorker 自动降级）</p>
     </header>
 
     <!-- 播放区域：可拖拽主资源 -->
