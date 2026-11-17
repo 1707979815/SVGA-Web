@@ -286,8 +286,164 @@ function syncFrameListWithMovie() {
   if (frameListOpen.value) generateFrameList()
 }
 
+
+// —— 素材图片列表（默认折叠不生成；展开后才把内嵌图片逐张转成缩略图）——
+/** 图片缩略图目标宽度（px），高度按原图比例等比换算 */
+const IMAGE_THUMB_WIDTH = 96
+/** 每生成多少张让出一次主线程，避免展开过程把页面卡死 */
+const IMAGE_CHUNK = 4
+
+/** 素材图片列表面板是否展开 */
+const imageListOpen = ref(false)
+/** 是否正在生成图片缩略图 */
+const imageListGenerating = ref(false)
+/** 已生成的张数（进度展示用） */
+const imageListProgress = ref(0)
+/** 素材内嵌图片总数 */
+const imageListTotal = ref(0)
+/** 已生成的图片缩略图（含素材里的 imageKey） */
+const imageThumbs = ref<Array<{ key: string; src: string }>>([])
+/** 生成失败原因（图片损坏 / 解码失败 / 尚未加载素材） */
+const imageListError = ref('')
+/** 无法出图的 imageKey（素材损坏或含跨域资源） */
+const imageFailedKeys = ref<string[]>([])
+
+/** 生成令牌：收起面板 / 切换素材时自增，令在途生成任务自行中止 */
+let imageGenToken = 0
+
 /**
- * 装载动画数据到主画布播放器，并同步帧列表的素材状态。
+ * 读取图片的像素尺寸，兼容 ImageBitmap（width/height）与 HTMLImageElement（naturalWidth/naturalHeight）。
+ * @param img 素材内嵌图片
+ * @returns 像素宽高，取不到时回落 1
+ */
+function readImageSize(img: ImageBitmap | HTMLImageElement): { w: number; h: number } {
+  const el = img as HTMLImageElement
+  return {
+    w: el.naturalWidth || el.width || 1,
+    h: el.naturalHeight || el.height || 1,
+  }
+}
+
+/**
+ * 丢弃已生成的图片缩略图并中止在途生成（收起面板、切换素材、销毁播放器时调用）。
+ */
+function discardImageList() {
+  imageGenToken++
+  imageListGenerating.value = false
+  imageListProgress.value = 0
+  imageThumbs.value = []
+  imageFailedKeys.value = []
+}
+
+/**
+ * 逐张生成素材内嵌图片的缩略图。
+ * `MovieData.images` 里的原图是已解码的 `ImageBitmap` / `HTMLImageElement`，
+ * 其 `src` 指向已回收的 blob URL，不能直接塞给 `<img>`，故统一重绘到画布再导出 dataURL。
+ * @returns 生成结束（成功、失败或被打断）后兑现的 Promise
+ */
+async function generateImageList(): Promise<void> {
+  const movie = movieRef.value
+  if (!movie) {
+    imageListError.value = '尚未加载动画，无法生成图片列表'
+    return
+  }
+  if (imageListGenerating.value) return
+
+  const entries = Object.entries(movie.images ?? {})
+  imageListTotal.value = entries.length
+  if (!entries.length) {
+    imageListError.value = '该素材不含内嵌图片（纯矢量动效，图形由 ShapeEntity 实时绘制）'
+    log('素材图片列表：该素材为纯矢量动效，无内嵌图片', 'info')
+    return
+  }
+
+  const token = ++imageGenToken
+  imageListGenerating.value = true
+  imageListError.value = ''
+  imageListProgress.value = 0
+  imageThumbs.value = []
+  imageFailedKeys.value = []
+
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+
+  try {
+    if (!ctx) throw new Error('缩略图 2D 上下文不可用')
+
+    const thumbs: Array<{ key: string; src: string }> = []
+    const failed: string[] = []
+
+    for (let i = 0; i < entries.length; i++) {
+      if (token !== imageGenToken) return
+      const [key, img] = entries[i]
+      if (!img) {
+        failed.push(key)
+      } else {
+        try {
+          const { w, h } = readImageSize(img)
+          const thumbW = Math.max(1, Math.min(IMAGE_THUMB_WIDTH, w))
+          const thumbH = Math.max(1, Math.round((h * thumbW) / w))
+          canvas.width = thumbW
+          canvas.height = thumbH
+          ctx.clearRect(0, 0, thumbW, thumbH)
+          ctx.drawImage(img, 0, 0, w, h, 0, 0, thumbW, thumbH)
+          thumbs.push({ key, src: canvas.toDataURL('image/png') })
+        } catch {
+          /** 单张失败（图片已损坏或解码异常）不应打断整批 */
+          failed.push(key)
+        }
+      }
+      if (i % IMAGE_CHUNK === IMAGE_CHUNK - 1 || i === entries.length - 1) {
+        imageThumbs.value = thumbs.slice()
+        imageFailedKeys.value = failed.slice()
+        imageListProgress.value = i + 1
+        await yieldToPaint()
+      }
+    }
+
+    if (token !== imageGenToken) return
+    if (thumbs.length) {
+      const suffix = failed.length > 0 ? '（' + failed.length + ' 张无法出图）' : ''
+      log('素材图片列表生成完成：' + thumbs.length + ' 张' + suffix, 'ok')
+    } else {
+      imageListError.value = '全部图片都无法出图：素材内嵌图片可能已损坏或解码失败'
+      log('素材图片列表生成失败：无可用图片', 'err')
+    }
+  } catch (e: any) {
+    if (token !== imageGenToken) return
+    const msg = e?.message ?? e
+    imageListError.value = '素材图片列表生成失败：' + msg
+    log('素材图片列表生成失败：' + msg, 'err')
+  } finally {
+    if (token === imageGenToken) imageListGenerating.value = false
+  }
+}
+
+/**
+ * 展开 / 收起素材图片列表：展开时立即生成，收起时丢弃已生成的缩略图。
+ */
+function toggleImageList() {
+  imageListOpen.value = !imageListOpen.value
+  if (imageListOpen.value) {
+    generateImageList()
+  } else {
+    discardImageList()
+    log('已收起素材图片列表并释放缩略图', 'info')
+  }
+}
+
+/**
+ * 素材变化后同步图片列表：先丢弃旧图，面板展开时再按新素材重新生成。
+ */
+function syncImageListWithMovie() {
+  discardImageList()
+  imageListError.value = ''
+  imageListTotal.value = movieRef.value ? Object.keys(movieRef.value.images ?? {}).length : 0
+  if (imageListOpen.value) generateImageList()
+}
+
+/**
+ * 装载动画数据到主画布播放器，并同步帧列表与图片列表的素材状态。
  * @param movie 解析完成的动画数据
  */
 async function mountMovie(movie: MovieData): Promise<void> {
@@ -296,6 +452,7 @@ async function mountMovie(movie: MovieData): Promise<void> {
   await p.setVideoItem(movie)
   movieRef.value = movie
   syncFrameListWithMovie()
+  syncImageListWithMovie()
 }
 
 // —— 动态替换 / 海报配置 ——
@@ -445,6 +602,7 @@ function init() {
   isPlaying.value = false
   movieRef.value = null
   discardFrameList()
+  discardImageList()
 
   if (!mainCanvas.value) { log('未找到画布节点', 'err'); return }
 
@@ -513,6 +671,7 @@ function destroy() {
   dynKey.value = ''
   movieRef.value = null
   discardFrameList()
+  discardImageList()
   log('已销毁播放器，可再次「初始化」', 'warn')
 }
 
@@ -572,6 +731,7 @@ function clearDynamic() {
 
 onBeforeUnmount(() => {
   discardFrameList()
+  discardImageList()
   player?.destroy()
 })
 </script>
@@ -753,9 +913,33 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <!-- 素材图片列表：默认折叠，展开后才把内嵌图片转成缩略图 -->
+    <section class="panel thumb-list image-list">
+      <div class="thumb-head">
+        <button class="btn" :aria-expanded="imageListOpen" @click="toggleImageList">
+          {{ imageListOpen ? '▾ 收起图片列表' : '▸ 展开图片列表' }}
+        </button>
+        <span class="hint">
+          内嵌图片 {{ imageListTotal || '?' }} 张 · 默认不生成
+          <template v-if="imageListGenerating"> · 生成中 {{ imageListProgress }}/{{ imageListTotal }}</template>
+          <template v-else-if="imageListOpen && imageThumbs.length"> · 已生成 {{ imageThumbs.length }} 张<template v-if="imageFailedKeys.length">，{{ imageFailedKeys.length }} 张无法出图</template></template>
+        </span>
+      </div>
+      <template v-if="imageListOpen">
+        <div v-if="imageListError" class="thumb-error">{{ imageListError }}</div>
+        <div v-else-if="imageThumbs.length" class="thumb-grid">
+          <figure v-for="item in imageThumbs" :key="item.key" class="thumb-item">
+            <img :src="item.src" :alt="item.key" loading="lazy" />
+            <figcaption>{{ item.key }}</figcaption>
+          </figure>
+        </div>
+        <div v-else class="hint">尚未生成缩略图。</div>
+      </template>
+    </section>
+
     <!-- 帧列表：默认折叠，展开后才逐帧生成缩略图 -->
-    <section class="panel frame-list">
-      <div class="frame-head">
+    <section class="panel thumb-list frame-list">
+      <div class="thumb-head">
         <button class="btn" :aria-expanded="frameListOpen" @click="toggleFrameList">
           {{ frameListOpen ? '▾ 收起帧列表' : '▸ 展开帧列表' }}
         </button>
@@ -772,9 +956,9 @@ onBeforeUnmount(() => {
         >重新生成</button>
       </div>
       <template v-if="frameListOpen">
-        <div v-if="frameListError" class="frame-error">{{ frameListError }}</div>
-        <div v-else-if="frameThumbs.length" class="frame-grid">
-          <figure v-for="(src, i) in frameThumbs" :key="i" class="frame-item">
+        <div v-if="frameListError" class="thumb-error">{{ frameListError }}</div>
+        <div v-else-if="frameThumbs.length" class="thumb-grid">
+          <figure v-for="(src, i) in frameThumbs" :key="i" class="thumb-item">
             <img :src="src" :alt="`第 ${i} 帧`" loading="lazy" />
             <figcaption>#{{ i }}</figcaption>
           </figure>
@@ -962,16 +1146,16 @@ onBeforeUnmount(() => {
   }
 }
 
-/* ---------- 帧列表 ---------- */
-.frame-list {
-  .frame-head {
+/* ---------- 缩略图面板（素材图片列表 / 帧列表共用一套布局） ---------- */
+.thumb-list {
+  .thumb-head {
     display: flex;
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
   }
-  .frame-error { font-size: 12px; color: var(--err); line-height: 1.6; }
-  .frame-grid {
+  .thumb-error { font-size: 12px; color: var(--err); line-height: 1.6; }
+  .thumb-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     gap: 10px;
@@ -979,7 +1163,7 @@ onBeforeUnmount(() => {
     overflow: auto;
     padding: 2px;
   }
-  .frame-item {
+  .thumb-item {
     margin: 0;
     background: var(--panel-2);
     border: 1px solid #242b3d;
@@ -1001,6 +1185,10 @@ onBeforeUnmount(() => {
       font-size: 11px;
       color: var(--muted);
       font-family: Consolas, Menlo, monospace;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
   }
 }
