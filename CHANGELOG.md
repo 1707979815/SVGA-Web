@@ -3,6 +3,12 @@
 记录 custom-svga 的版本变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 日期以 npm 实际发布时间为准。1.x 为旧架构（离屏渲染），已归档 `versions/`，不再逐版本展开。
 
+## [2.4.2] - 2026-11-17
+
+### Added
+
+- `PlayConfig.invisibleBehavior` 新增 `'none'`：可见性变化不做任何处理（既不暂停时间轴也不跳绘制），`advance()` 在 `'none'` 时忽略 `observerIsVisible`。
+
 ## [2.4.1] - 2026-11-05
 
 ### Fixed

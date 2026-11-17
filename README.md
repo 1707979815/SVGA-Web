@@ -34,7 +34,7 @@ Size, gzipped (whole package, no code splitting):
 
 | Package | Version | gzip | vs. custom-svga |
 |---|---|---|---|
-| **custom-svga** | 2.4.1 | **13.3 KB** | — |
+| **custom-svga** | 2.4.2 | **13.3 KB** | — |
 | `svga.lite` | 1.6.x | ~27 KB (per its README) | ~2× larger |
 | `svgaplayerweb` | 2.3.x | ~34 KB (Bundlephobia) | ~2.6× larger |
 
@@ -49,7 +49,7 @@ What you get beyond a plain player:
 | **`cacheFrames`** | Caches rendered frames as bitmaps when the loop range fits in `maxCacheFrames`; replays become pure `drawImage`. |
 | **`defaultPoster`** | A static image shown before playback, on load failure, and after `fillMode: 'clear'` — no white flash. |
 | **`onPoster` event** | Tells you *why* the poster appeared (`defaultPoster` / `external` / `clear`) so you can track failures. |
-| **`invisibleBehavior`** | `pause` (stop the timeline) or `skip` (keep the timeline, skip painting) when scrolled out of view. |
+| **`invisibleBehavior`** | `pause` (stop the timeline), `skip` (keep the timeline, skip painting) or `none` (ignore visibility changes entirely) when scrolled out of view. |
 | **`skipRender()`** | Keep the timeline running while painting is suspended — useful for tab switches and modals. |
 | **Full TypeScript** | Every config field, event payload and data structure is typed; no `any` casts in your app. |
 
@@ -272,7 +272,7 @@ const info = await queryMemoryInfo(url, true) // log = false silences console.ta
 | `scaleMode` | `AspectFit` | `SCALE_MODE`: `AspectFit` / `AspectFill` / `Fill` |
 | `maxDpr` | Unlimited | `devicePixelRatio` cap: the canvas renders at `min(devicePixelRatio, maxDpr)`. Reduces pixel count on large canvases / low-end devices at the cost of sharpness; unnecessary for small animations. `0` / unset = unlimited |
 | `useIntersectionObserver` | `true` | Off-screen viewport optimization |
-| `invisibleBehavior` | `pause` | When invisible: `pause` (timeline stops) or `skip` (skip painting only, timeline keeps advancing) |
+| `invisibleBehavior` | `pause` | When invisible: `pause` (timeline stops), `skip` (skip painting only, timeline keeps advancing) or `none` (no handling at all) |
 | `frameThrottling` | `0` | Frame-throttled rendering (for complex animations): target paint-rate cap in fps; the timeline and duration are unaffected |
 | `cacheFrames` / `maxCacheFrames` | `false` / `100` | Frame cache (bitmap). Enabled only when the loop range length ≤ `maxCacheFrames`; otherwise disabled entirely with a one-time hint. Prefer `frameThrottling` for large canvases |
 | `defaultPoster` | - | Static cover image shown before playback, on load failure, and after `fillMode: 'clear'`. See [Default poster](#default-poster-static-cover) |

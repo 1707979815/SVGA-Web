@@ -34,7 +34,7 @@
 
 | 包 | 版本 | gzip | 相对本包 |
 |---|---|---|---|
-| **custom-svga** | 2.4.1 | **13.3 KB** | — |
+| **custom-svga** | 2.4.2 | **13.3 KB** | — |
 | `svga.lite` | 1.6.x | ~27 KB（其 README 自述） | 约 2 倍 |
 | `svgaplayerweb` | 2.3.x | ~34 KB（Bundlephobia） | 约 2.6 倍 |
 
@@ -49,7 +49,7 @@
 | **`cacheFrames`** | 循环区间能装进 `maxCacheFrames` 时，把已绘制帧缓存成位图，回放退化为纯 `drawImage` |
 | **`defaultPoster`** | 播放前、加载失败、`fillMode: 'clear'` 停播后的静态封面，规避白屏 |
 | **`onPoster` 事件** | 告知海报出现的**原因**（`defaultPoster` / `external`），便于打点统计失败率 |
-| **`invisibleBehavior`** | 滚出视口时可选 `pause`（停时间轴）或 `skip`（只跳绘制、时间轴继续） |
+| **`invisibleBehavior`** | 滚出视口时可选 `pause`（停时间轴）、`skip`（只跳绘制、时间轴继续）或 `none`（显示隐藏不做任何处理） |
 | **`skipRender()`** | 挂起绘制但保留时间轴，适合切 tab、弹窗遮挡等场景 |
 | **完整 TypeScript** | 配置项、事件载荷、数据结构全部有类型，业务侧不需要 `any` 断言 |
 
@@ -272,7 +272,7 @@ const info = await queryMemoryInfo(url, true) // log = false 可关闭 console.t
 | `scaleMode` | `AspectFit` | `SCALE_MODE`：`AspectFit` / `AspectFill` / `Fill` |
 | `maxDpr` | 不限制 | `devicePixelRatio` 上限：画布按 `min(devicePixelRatio, maxDpr)` 出图。大画布 / 低端机降像素量换性能（画面会变软），小尺寸动效无需设置；`0`/不传 = 不限制 |
 | `useIntersectionObserver` | `true` | 视口不可见优化 |
-| `invisibleBehavior` | `pause` | 不可见时 `pause`（停走）或 `skip`（仅跳绘制，帧仍走） |
+| `invisibleBehavior` | `pause` | 不可见时 `pause`（停走）、`skip`（仅跳绘制，帧仍走）或 `none`（不做任何处理） |
 | `frameThrottling` | `0` | 抽帧渲染（适合复杂动效）：目标渲染帧率上限（fps），时间轴照常推进、时长不变 |
 | `cacheFrames` / `maxCacheFrames` | `false` / `100` | 帧缓存（位图化）。仅当循环区间帧数 ≤ `maxCacheFrames` 时启用，装不下则整体禁用并提示；大画布建议改用 `frameThrottling` |
 | `defaultPoster` | - | 默认静态封面：播放前、加载失败、`fillMode: 'clear'` 停播后显示，详见 [默认静态海报](#默认静态海报defaultposter) |
