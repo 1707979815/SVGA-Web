@@ -13,7 +13,8 @@ type SourceTarget = 'main' | 'image' | 'poster'
 const mainFile = ref<File | null>(null)
 const imageFile = ref<File | null>(null)
 const posterFile = ref<File | null>(null)
-const dragTarget = ref<SourceTarget | null>(null)
+/** 播放区是否正被拖入（页面里唯一接受拖放的位置） */
+const dragActive = ref(false)
 const fileInputMain = ref<HTMLInputElement | null>(null)
 const fileInputImage = ref<HTMLInputElement | null>(null)
 const fileInputPoster = ref<HTMLInputElement | null>(null)
@@ -500,17 +501,17 @@ function onFilePicked(target: SourceTarget, e: Event) {
 }
 
 /**
- * 拖入文件：主资源拖入后立即初始化（如未初始化）并解析播放；
- * 动态图片 / 海报仍只登记文件，等用户点对应按钮再应用。
- * @param target 拖入目标
+ * 播放区拖入动效文件：登记为主资源后立即初始化（如未初始化）并解析播放。
+ * 拖放**只服务主资源**——页面里只有播放区域接受拖入，动态图片与海报只能用
+ * 「选择文件」按钮或填写地址，避免一次拖放产生「是换素材还是换图片」的歧义。
  * @param e 拖拽事件
  */
-async function onDrop(target: SourceTarget, e: DragEvent) {
-  dragTarget.value = null
+async function onDropMain(e: DragEvent) {
+  dragActive.value = false
   const file = e.dataTransfer?.files?.[0]
   if (!file) return
-  applyFile(target, file)
-  if (target === 'main') await playDroppedFile(file)
+  applyFile('main', file)
+  await playDroppedFile(file)
 }
 
 /**
@@ -745,10 +746,10 @@ onBeforeUnmount(() => {
 
     <!-- 播放区域：可拖拽主资源 -->
     <section class="stage-pane"
-      :class="{ dragging: dragTarget === 'main' }"
-      @dragover.prevent="dragTarget = 'main'"
-      @dragleave.prevent="dragTarget = null"
-      @drop.prevent="onDrop('main', $event)"
+      :class="{ dragging: dragActive }"
+      @dragover.prevent="dragActive = true"
+      @dragleave.prevent="dragActive = false"
+      @drop.prevent="onDropMain($event)"
     >
       <div class="pane-head">
         <span class="dot" />
@@ -756,7 +757,7 @@ onBeforeUnmount(() => {
         <span class="src-label">{{ mainSourceLabel }}</span>
       </div>
       <div class="stage-host"><canvas ref="mainCanvas" class="stage" /></div>
-      <div v-if="dragTarget === 'main'" class="drop-hint">松开以加载 SVGA 文件</div>
+      <div v-if="dragActive" class="drop-hint">松开以加载 SVGA 文件并播放</div>
     </section>
 
     <!-- 资源 -->
@@ -878,12 +879,7 @@ onBeforeUnmount(() => {
         <button class="btn" @click="applyText">注入文本</button>
       </div>
 
-      <div class="dyn-row source-row"
-        :class="{ dragging: dragTarget === 'image' }"
-        @dragover.prevent="dragTarget = 'image'"
-        @dragleave.prevent="dragTarget = null"
-        @drop.prevent="onDrop('image', $event)"
-      >
+      <div class="dyn-row source-row">
         <span class="row-title">动态图片</span>
         <label class="field grow"><span>图片地址</span><input v-model="imageUrl" type="text" placeholder="https://example.com/face.png" /></label>
         <span class="file-box">
@@ -895,12 +891,7 @@ onBeforeUnmount(() => {
         <button class="btn" @click="clearDynamic">清空动态</button>
       </div>
 
-      <div class="dyn-row source-row"
-        :class="{ dragging: dragTarget === 'poster' }"
-        @dragover.prevent="dragTarget = 'poster'"
-        @dragleave.prevent="dragTarget = null"
-        @drop.prevent="onDrop('poster', $event)"
-      >
+      <div class="dyn-row source-row">
         <span class="row-title">海报</span>
         <label class="field grow"><span>海报地址</span><input v-model="posterUrl" type="text" placeholder="https://example.com/poster.png" /></label>
         <span class="file-box">
@@ -1129,7 +1120,6 @@ onBeforeUnmount(() => {
   padding: 10px;
   margin: -10px -8px;
   transition: border-color 0.2s, background 0.2s;
-  &.dragging { border-color: var(--accent); background: rgba(59, 108, 240, 0.08); }
   .row-title { align-self: end; }
   .file-box {
     display: flex;
