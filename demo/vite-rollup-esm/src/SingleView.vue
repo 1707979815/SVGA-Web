@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed, onBeforeUnmount, shallowRef } from 'vue'
 import { Player, Parser, SCALE_MODE, demoInfo } from './svga'
 import AssetPicker from './AssetPicker.vue'
 import { DEFAULT_ASSET } from './assets'
@@ -129,6 +129,175 @@ function log(msg: string, level: 'info' | 'ok' | 'warn' | 'err' = 'info') {
   statusLevel.value = level
 }
 
+// —— 帧列表（默认折叠不生成；展开后才逐帧生成缩略图）——
+/** 缩略图目标宽度（px），高度按源画布比例等比换算 */
+const FRAME_THUMB_WIDTH = 96
+/** 每生成多少帧让出一次主线程，避免展开过程把页面卡死 */
+const FRAME_CHUNK = 6
+
+/** 当前装载进主画布的动画数据（帧列表按它逐帧出图，避免重复解析） */
+const movieRef = shallowRef<MovieData | null>(null)
+/** 帧列表面板是否展开 */
+const frameListOpen = ref(false)
+/** 是否正在生成缩略图 */
+const frameListGenerating = ref(false)
+/** 已生成的帧数（进度展示用） */
+const frameListProgress = ref(0)
+/** 已生成的缩略图（dataURL，按帧号顺序） */
+const frameThumbs = ref<string[]>([])
+/** 生成失败原因（如跨域图片导致画布被污染） */
+const frameListError = ref('')
+
+/** 生成令牌：收起面板 / 切换素材时自增，令在途生成任务自行中止并释放资源 */
+let frameGenToken = 0
+/** 缩略图专用临时播放器（独立于主画布的离屏载体），用完即销毁 */
+let frameScratchPlayer: Player | null = null
+
+/**
+ * 让出一次主线程，使分片生成过程可渲染进度。
+ * @returns 下一帧回调触发后兑现的 Promise
+ */
+function yieldToPaint(): Promise<void> {
+  return new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+}
+
+/**
+ * 销毁缩略图专用的临时播放器与画布，释放其帧缓存与像素内存。
+ */
+function disposeFrameScratch() {
+  frameScratchPlayer?.destroy()
+  frameScratchPlayer = null
+}
+
+/**
+ * 丢弃已生成的缩略图并中止在途生成（收起面板、切换素材、销毁播放器时调用）。
+ */
+function discardFrameList() {
+  frameGenToken++
+  frameListGenerating.value = false
+  frameListProgress.value = 0
+  frameThumbs.value = []
+  disposeFrameScratch()
+}
+
+/**
+ * 逐帧生成缩略图：用一台独立于主画布的临时播放器把每一帧画到离屏画布，
+ * 再等比缩到缩略图尺寸转成 dataURL，因此不会打断主画布上的播放与回归状态。
+ * @returns 生成结束（成功、失败或被打断）后兑现的 Promise
+ */
+async function generateFrameList(): Promise<void> {
+  const movie = movieRef.value
+  if (!movie) {
+    frameListError.value = '尚未加载动画，无法生成帧列表'
+    return
+  }
+  if (frameListGenerating.value) return
+
+  const total = movie.params?.frames || 0
+  if (total <= 0 || !movie.params?.viewBoxWidth || !movie.params?.viewBoxHeight) {
+    frameListError.value = '动画参数异常（缺少帧数或 viewBox），无法生成帧列表'
+    log('帧列表生成失败：动画参数异常', 'err')
+    return
+  }
+
+  const token = ++frameGenToken
+  frameListGenerating.value = true
+  frameListError.value = ''
+  frameListProgress.value = 0
+  frameThumbs.value = []
+
+  disposeFrameScratch()
+  const canvas = document.createElement('canvas')
+  const scratch = new Player(canvas, {
+    loop: 0,
+    autoPlay: false,
+    useIntersectionObserver: false,
+    fillMode: 'forwards',
+    scaleMode: SCALE_MODE.ASPECT_FIT,
+    /** 缩略图只有百来像素宽，临时画布没必要按设备 DPR 全量出图 */
+    maxDpr: 1,
+  })
+  frameScratchPlayer = scratch
+
+  try {
+    await scratch.setVideoItem(movie)
+    if (token !== frameGenToken) return
+
+    const srcW = canvas.width
+    const srcH = canvas.height
+    if (srcW <= 0 || srcH <= 0) throw new Error('临时画布尺寸无效')
+
+    const thumbW = Math.max(1, Math.min(FRAME_THUMB_WIDTH, srcW))
+    const thumbH = Math.max(1, Math.round((srcH * thumbW) / srcW))
+    const thumbCanvas = document.createElement('canvas')
+    thumbCanvas.width = thumbW
+    thumbCanvas.height = thumbH
+    const thumbCtx = thumbCanvas.getContext('2d')
+    if (!thumbCtx) throw new Error('缩略图 2D 上下文不可用')
+
+    const thumbs: string[] = []
+    for (let i = 0; i < total; i++) {
+      if (token !== frameGenToken) return
+      scratch.stepToFrame(i, false)
+      /** 每帧先擦净再等比贴入，避免透明帧互相叠加 */
+      thumbCtx.clearRect(0, 0, thumbW, thumbH)
+      thumbCtx.drawImage(canvas, 0, 0, srcW, srcH, 0, 0, thumbW, thumbH)
+      thumbs.push(thumbCanvas.toDataURL('image/png'))
+      if (i % FRAME_CHUNK === FRAME_CHUNK - 1 || i === total - 1) {
+        frameThumbs.value = thumbs.slice()
+        frameListProgress.value = i + 1
+        await yieldToPaint()
+      }
+    }
+    if (token !== frameGenToken) return
+    log(`帧列表生成完成：共 ${total} 帧缩略图`, 'ok')
+  } catch (e: any) {
+    if (token !== frameGenToken) return
+    const msg = e?.message ?? e
+    frameListError.value = `帧列表生成失败：${msg}（若动效内含跨域图片导致画布被污染，请改用同源素材）`
+    log(`帧列表生成失败：${msg}`, 'err')
+  } finally {
+    if (token === frameGenToken) {
+      frameListGenerating.value = false
+      disposeFrameScratch()
+    }
+  }
+}
+
+/**
+ * 展开 / 收起帧列表：展开时立即生成缩略图，收起时释放已生成的图与临时播放器。
+ */
+function toggleFrameList() {
+  frameListOpen.value = !frameListOpen.value
+  if (frameListOpen.value) {
+    generateFrameList()
+  } else {
+    discardFrameList()
+    log('已收起帧列表并释放缩略图', 'info')
+  }
+}
+
+/**
+ * 素材变化后同步帧列表：先丢弃旧图，面板展开时再按新素材重新生成。
+ */
+function syncFrameListWithMovie() {
+  discardFrameList()
+  frameListError.value = ''
+  if (frameListOpen.value) generateFrameList()
+}
+
+/**
+ * 装载动画数据到主画布播放器，并同步帧列表的素材状态。
+ * @param movie 解析完成的动画数据
+ */
+async function mountMovie(movie: MovieData): Promise<void> {
+  const p = player
+  if (!p) return
+  await p.setVideoItem(movie)
+  movieRef.value = movie
+  syncFrameListWithMovie()
+}
+
 // —— 动态替换 / 海报配置 ——
 const spriteKeys = ref<string[]>([])
 const dynKey = ref('')
@@ -173,10 +342,39 @@ function onFilePicked(target: SourceTarget, e: Event) {
   if (file) applyFile(target, file)
 }
 
-function onDrop(target: SourceTarget, e: DragEvent) {
+/**
+ * 拖入文件：主资源拖入后立即初始化（如未初始化）并解析播放；
+ * 动态图片 / 海报仍只登记文件，等用户点对应按钮再应用。
+ * @param target 拖入目标
+ * @param e 拖拽事件
+ */
+async function onDrop(target: SourceTarget, e: DragEvent) {
   dragTarget.value = null
   const file = e.dataTransfer?.files?.[0]
-  if (file) applyFile(target, file)
+  if (!file) return
+  applyFile(target, file)
+  if (target === 'main') await playDroppedFile(file)
+}
+
+/**
+ * 直接播放拖入的动效文件：缺播放器时先按当前面板配置初始化，再解析并装载。
+ * @param file 拖入的 .svga 文件
+ */
+async function playDroppedFile(file: File) {
+  if (!player) {
+    init()
+    if (!player) return
+  }
+  busy.value = true
+  try {
+    const movie = await Parser.loadFile(file)
+    await mountMovie(movie)
+    log(`已拖入并播放：${file.name}`, 'ok')
+  } catch (e: any) {
+    log(`拖入文件播放失败：${e?.message ?? e}`, 'err')
+  } finally {
+    busy.value = false
+  }
 }
 
 function fileToImageUrl(file: File): string {
@@ -245,6 +443,8 @@ function init() {
   dynKey.value = ''
   frame.value = loopCount.value = fps.value = 0
   isPlaying.value = false
+  movieRef.value = null
+  discardFrameList()
 
   if (!mainCanvas.value) { log('未找到画布节点', 'err'); return }
 
@@ -267,7 +467,7 @@ async function loadAndParse() {
   try {
     const movie = file ? await Parser.loadFile(file) : await Parser.loadUrl(raw)
     /** autoPlay 由 Player 配置驱动：setVideoItem 装载完成后内部自动播放 */
-    await player.setVideoItem(movie)
+    await mountMovie(movie)
     log(`已加载（${file ? '文件' : 'URL'}）${autoPlay.value ? '并自动播放' : '，未自动播放，请点击「播放」'}`, 'ok')
   } catch (e: any) {
     log(`加载失败：${e?.message ?? e}`, 'err')
@@ -311,6 +511,8 @@ function destroy() {
   frame.value = loopCount.value = fps.value = 0
   spriteKeys.value = []
   dynKey.value = ''
+  movieRef.value = null
+  discardFrameList()
   log('已销毁播放器，可再次「初始化」', 'warn')
 }
 
@@ -369,6 +571,7 @@ function clearDynamic() {
 }
 
 onBeforeUnmount(() => {
+  discardFrameList()
   player?.destroy()
 })
 </script>
@@ -411,7 +614,7 @@ onBeforeUnmount(() => {
       <div class="panel-actions">
         <button class="btn" :disabled="busy" @click="fileInputMain?.click()">选择文件</button>
         <input ref="fileInputMain" type="file" hidden accept=".svga" @change="onFilePicked('main', $event)" />
-        <span class="hint">或将 .svga 文件拖入上方播放区域</span>
+        <span class="hint">或将 .svga 文件拖入上方播放区域，拖入即解析播放</span>
       </div>
     </section>
 
@@ -548,6 +751,36 @@ onBeforeUnmount(() => {
         <button class="btn" @click="renderPoster">渲染海报</button>
         <label class="check"><input v-model="posterAsDefault" type="checkbox" /><span>作为 defaultPoster</span></label>
       </div>
+    </section>
+
+    <!-- 帧列表：默认折叠，展开后才逐帧生成缩略图 -->
+    <section class="panel frame-list">
+      <div class="frame-head">
+        <button class="btn" :aria-expanded="frameListOpen" @click="toggleFrameList">
+          {{ frameListOpen ? '▾ 收起帧列表' : '▸ 展开帧列表' }}
+        </button>
+        <span class="hint">
+          共 {{ totalFrames || '?' }} 帧 · 默认不生成
+          <template v-if="frameListGenerating"> · 生成中 {{ frameListProgress }}/{{ totalFrames }}</template>
+          <template v-else-if="frameListOpen && frameThumbs.length"> · 已生成 {{ frameThumbs.length }} 张</template>
+        </span>
+        <button
+          v-if="frameListOpen"
+          class="btn"
+          :disabled="frameListGenerating || !movieRef"
+          @click="generateFrameList"
+        >重新生成</button>
+      </div>
+      <template v-if="frameListOpen">
+        <div v-if="frameListError" class="frame-error">{{ frameListError }}</div>
+        <div v-else-if="frameThumbs.length" class="frame-grid">
+          <figure v-for="(src, i) in frameThumbs" :key="i" class="frame-item">
+            <img :src="src" :alt="`第 ${i} 帧`" loading="lazy" />
+            <figcaption>#{{ i }}</figcaption>
+          </figure>
+        </div>
+        <div v-else class="hint">尚未生成缩略图。</div>
+      </template>
     </section>
 
     <section class="console">
@@ -725,6 +958,49 @@ onBeforeUnmount(() => {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+  }
+}
+
+/* ---------- 帧列表 ---------- */
+.frame-list {
+  .frame-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .frame-error { font-size: 12px; color: var(--err); line-height: 1.6; }
+  .frame-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 10px;
+    max-height: 340px;
+    overflow: auto;
+    padding: 2px;
+  }
+  .frame-item {
+    margin: 0;
+    background: var(--panel-2);
+    border: 1px solid #242b3d;
+    border-radius: 8px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+    img {
+      width: 100%;
+      height: auto;
+      display: block;
+      background: #000;
+      border-radius: 4px;
+      image-rendering: auto;
+    }
+    figcaption {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: Consolas, Menlo, monospace;
     }
   }
 }
