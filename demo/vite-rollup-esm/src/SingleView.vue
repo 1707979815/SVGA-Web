@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, shallowRef } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, shallowRef } from 'vue'
 import { Player, Parser, SCALE_MODE, demoInfo } from './svga'
 import AssetPicker from './AssetPicker.vue'
 import { DEFAULT_ASSET } from './assets'
@@ -174,6 +174,7 @@ function disposeFrameScratch() {
  * 丢弃已生成的缩略图并中止在途生成（收起面板、切换素材、销毁播放器时调用）。
  */
 function discardFrameList() {
+  if (preview.value?.source === 'frame') closePreview()
   frameGenToken++
   frameListGenerating.value = false
   frameListProgress.value = 0
@@ -329,6 +330,7 @@ function readImageSize(img: ImageBitmap | HTMLImageElement): { w: number; h: num
  * 丢弃已生成的图片缩略图并中止在途生成（收起面板、切换素材、销毁播放器时调用）。
  */
 function discardImageList() {
+  if (preview.value?.source === 'image') closePreview()
   imageGenToken++
   imageListGenerating.value = false
   imageListProgress.value = 0
@@ -442,6 +444,169 @@ function syncImageListWithMovie() {
   imageListTotal.value = movieRef.value ? Object.keys(movieRef.value.images ?? {}).length : 0
   if (imageListOpen.value) generateImageList()
 }
+
+// —— 缩略图预览弹框（图片列表与帧列表共用）——
+/** 预览来源：素材内嵌图片 或 动画帧 */
+type PreviewSource = 'image' | 'frame'
+
+/** 当前预览的条目（null 表示弹框关闭） */
+const preview = ref<{ source: PreviewSource; index: number } | null>(null)
+
+/** 统一成 { src, label }，图片列表与帧列表的数据结构不同，预览层用同一份 */
+const previewItems = computed<Array<{ src: string; label: string }>>(() => {
+  const p = preview.value
+  if (!p) return []
+  if (p.source === 'image') return imageThumbs.value.map(t => ({ src: t.src, label: t.key }))
+  return frameThumbs.value.map((src, i) => ({ src, label: `第 ${i} 帧` }))
+})
+
+/** 当前预览项；缩略图被重新生成/丢弃后索引可能越界，此时按空处理以关闭弹框 */
+const previewItem = computed(() => previewItems.value[preview.value?.index ?? -1] ?? null)
+
+/** 高清预览图（按素材原始分辨率重绘，缩略图只有 96px 直接放大必糊） */
+const previewSrc = ref('')
+/** 高清图是否正在生成 */
+const previewLoading = ref(false)
+
+/** 预览令牌：快速连按方向键时让旧请求作废，避免后到的旧图覆盖新图 */
+let previewToken = 0
+/** 帧预览专用的临时播放器（弹框打开期间存活，关闭即销毁） */
+let previewPlayer: Player | null = null
+/** 帧预览专用的临时画布（保持原始像素尺寸） */
+let previewCanvas: HTMLCanvasElement | null = null
+
+/** 销毁帧预览的临时播放器与画布 */
+function disposePreviewPlayer() {
+  previewPlayer?.destroy()
+  previewPlayer = null
+  previewCanvas = null
+}
+
+/**
+ * 按素材原始分辨率重绘当前预览项。
+ * - 图片项：直接从 `MovieData.images` 里的已解码位图重绘，无额外解析成本
+ * - 帧项：另建一台临时播放器（`maxDpr: 1`）跳到该帧后整幅截取，不干扰主画布
+ */
+async function renderPreviewHiRes() {
+  const p = preview.value
+  const item = previewItem.value
+  if (!p || !item) {
+    previewSrc.value = ''
+    return
+  }
+
+  const token = ++previewToken
+  previewLoading.value = true
+  try {
+    if (p.source === 'image') {
+      const movie = movieRef.value
+      const key = imageThumbs.value[p.index]?.key
+      const img = key ? movie?.images?.[key] : null
+      if (!img) {
+        /** 取不到原始位图时退回缩略图，宁可糊也不要空框 */
+        previewSrc.value = item.src
+        return
+      }
+      const { w, h } = readImageSize(img)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, w)
+      canvas.height = Math.max(1, h)
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        previewSrc.value = item.src
+        return
+      }
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0, w, h)
+      if (token === previewToken) previewSrc.value = canvas.toDataURL('image/png')
+      return
+    }
+
+    /** 帧预览：确保临时播放器已装载当前素材 */
+    const movie = movieRef.value
+    if (!movie) {
+      previewSrc.value = item.src
+      return
+    }
+    if (!previewPlayer || !previewCanvas) {
+      disposePreviewPlayer()
+      const canvas = document.createElement('canvas')
+      const scratch = new Player(canvas, {
+        loop: 0,
+        autoPlay: false,
+        useIntersectionObserver: false,
+        fillMode: 'forwards',
+        scaleMode: SCALE_MODE.ASPECT_FIT,
+        /** 预览要看清细节，但没必要按设备 DPR 翻倍出图 */
+        maxDpr: 1,
+      })
+      previewCanvas = canvas
+      previewPlayer = scratch
+      await scratch.setVideoItem(movie)
+    }
+    if (token !== previewToken || !previewPlayer || !previewCanvas) return
+
+    previewPlayer.stepToFrame(p.index, false)
+    if (token !== previewToken) return
+    previewSrc.value = previewCanvas.toDataURL('image/png')
+  } catch {
+    /** 任何失败都退回缩略图，弹框不该因为预览失败而空白 */
+    if (token === previewToken) previewSrc.value = item.src
+  } finally {
+    if (token === previewToken) previewLoading.value = false
+  }
+}
+
+/**
+ * 打开预览弹框。
+ * @param source 来源面板
+ * @param index 条目下标
+ */
+function openPreview(source: PreviewSource, index: number) {
+  preview.value = { source, index }
+  renderPreviewHiRes()
+}
+
+/** 关闭预览弹框，并释放帧预览的临时播放器 */
+function closePreview() {
+  preview.value = null
+  previewSrc.value = ''
+  previewLoading.value = false
+  previewToken++
+  disposePreviewPlayer()
+}
+
+/**
+ * 在当前来源的列表里循环切换预览项。
+ * @param delta 偏移量（-1 上一张 / 1 下一张）
+ */
+function stepPreview(delta: number) {
+  const p = preview.value
+  const list = previewItems.value
+  if (!p || list.length < 2) return
+  preview.value = { source: p.source, index: (p.index + delta + list.length) % list.length }
+  renderPreviewHiRes()
+}
+
+/**
+ * 预览弹框快捷键：Esc 关闭、左右方向键切换；弹框未打开时不拦截任何按键。
+ * @param e 键盘事件
+ */
+function onPreviewKeydown(e: KeyboardEvent) {
+  if (!preview.value) return
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    closePreview()
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    stepPreview(-1)
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    stepPreview(1)
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onPreviewKeydown))
 
 /**
  * 装载动画数据到主画布播放器，并同步帧列表与图片列表的素材状态。
@@ -731,6 +896,8 @@ function clearDynamic() {
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onPreviewKeydown)
+  disposePreviewPlayer()
   discardFrameList()
   discardImageList()
   player?.destroy()
@@ -919,7 +1086,17 @@ onBeforeUnmount(() => {
       <template v-if="imageListOpen">
         <div v-if="imageListError" class="thumb-error">{{ imageListError }}</div>
         <div v-else-if="imageThumbs.length" class="thumb-grid">
-          <figure v-for="item in imageThumbs" :key="item.key" class="thumb-item">
+          <figure
+            v-for="(item, i) in imageThumbs"
+            :key="item.key"
+            class="thumb-item"
+            role="button"
+            tabindex="0"
+            :title="`点击预览 ${item.key}`"
+            @click="openPreview('image', i)"
+            @keydown.enter.prevent="openPreview('image', i)"
+            @keydown.space.prevent="openPreview('image', i)"
+          >
             <img :src="item.src" :alt="item.key" loading="lazy" />
             <figcaption>{{ item.key }}</figcaption>
           </figure>
@@ -949,7 +1126,17 @@ onBeforeUnmount(() => {
       <template v-if="frameListOpen">
         <div v-if="frameListError" class="thumb-error">{{ frameListError }}</div>
         <div v-else-if="frameThumbs.length" class="thumb-grid">
-          <figure v-for="(src, i) in frameThumbs" :key="i" class="thumb-item">
+          <figure
+            v-for="(src, i) in frameThumbs"
+            :key="i"
+            class="thumb-item"
+            role="button"
+            tabindex="0"
+            :title="`点击预览第 ${i} 帧`"
+            @click="openPreview('frame', i)"
+            @keydown.enter.prevent="openPreview('frame', i)"
+            @keydown.space.prevent="openPreview('frame', i)"
+          >
             <img :src="src" :alt="`第 ${i} 帧`" loading="lazy" />
             <figcaption>#{{ i }}</figcaption>
           </figure>
@@ -962,6 +1149,30 @@ onBeforeUnmount(() => {
       <template v-for="(l, i) in logs" :key="i"><div class="line">{{ l }}</div></template>
       <div v-if="!logs.length" class="line muted">暂无日志…</div>
     </section>
+
+    <!-- 缩略图预览弹框：Teleport 到 body，避免被面板的 overflow 裁切 -->
+    <Teleport to="body">
+      <div v-if="previewItem" class="thumb-preview" @click.self="closePreview">
+        <figure class="preview-box">
+          <figcaption class="preview-head">
+            <span class="preview-title">
+              {{ preview?.source === 'image' ? '素材图片' : '动画帧' }} · {{ previewItem.label }}
+              <em class="preview-index">{{ (preview?.index ?? 0) + 1 }} / {{ previewItems.length }}</em>
+            </span>
+            <span class="preview-actions">
+              <button class="btn" :disabled="previewItems.length < 2" @click="stepPreview(-1)">上一张</button>
+              <button class="btn" :disabled="previewItems.length < 2" @click="stepPreview(1)">下一张</button>
+              <button class="btn" @click="closePreview">关闭</button>
+            </span>
+          </figcaption>
+          <div class="preview-stage">
+            <img v-if="previewSrc" :src="previewSrc" :alt="previewItem.label" />
+            <span v-else class="preview-loading">{{ previewLoading ? '正在生成高清预览…' : '暂无预览图' }}</span>
+          </div>
+          <p class="preview-hint">Esc 关闭 · ← / → 切换</p>
+        </figure>
+      </div>
+    </Teleport>
   </main>
 </template>
 
@@ -1163,6 +1374,13 @@ onBeforeUnmount(() => {
     flex-direction: column;
     gap: 4px;
     align-items: center;
+    cursor: zoom-in;
+    transition: border-color 0.2s, transform 0.12s;
+    &:hover,
+    &:focus-visible {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
     img {
       width: 100%;
       height: auto;
@@ -1181,6 +1399,87 @@ onBeforeUnmount(() => {
       white-space: nowrap;
     }
   }
+}
+
+/* ---------- 缩略图预览弹框 ---------- */
+.thumb-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(6, 8, 12, 0.78);
+  backdrop-filter: blur(3px);
+}
+
+.preview-box {
+  margin: 0;
+  max-width: min(92vw, 1080px);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong, #33405c);
+  border-radius: var(--radius, 12px);
+  padding: 14px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+.preview-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  .preview-title {
+    font-size: 13px;
+    color: var(--text);
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .preview-index {
+    font-style: normal;
+    font-size: 11px;
+    color: var(--muted);
+    font-family: Consolas, Menlo, monospace;
+  }
+  .preview-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+  }
+}
+
+.preview-stage {
+  /* min-height:0 让图片在 92vh 内正确收缩，否则 flex 子项按内容撑破容器 */
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  background: #05070b;
+  border-radius: 8px;
+  img {
+    /* 预览图按素材原始分辨率重绘，故用 max-* 而非固定尺寸，小图不放大、大图不溢出 */
+    max-width: 100%;
+    max-height: calc(92vh - 140px);
+    display: block;
+  }
+  .preview-loading {
+    padding: 48px 64px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+}
+
+.preview-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
 }
 
 /* ---------- 控制台 ---------- */
